@@ -1,0 +1,19 @@
+opentelemetry-instrumentation-eodag Copyright 2024 CS GROUP - France
+
+This software is distributed under the Apache Software License (ASL) v2.0, see LICENSE
+file or http://www.apache.org/licenses/LICENSE-2.0 for details.
+
+
+This software includes code from many other open source projects. See below for details
+about the license of each project.
+
+
+================================================================
+The Apache 2.0 License
+================================================================
+
+The following components are provided under the  Apache 2.0 License  (https://opensource.org/licenses/Apache-2.0).
+See project link for details.
+
+https://github.com/open-telemetry/opentelemetry-python
+https://github.com/open-telemetry/opentelemetry-python-contrib
