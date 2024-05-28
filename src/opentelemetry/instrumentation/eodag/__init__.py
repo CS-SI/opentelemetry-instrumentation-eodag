@@ -35,7 +35,6 @@ from eodag.utils import (
     DEFAULT_DOWNLOAD_WAIT,
     ProgressCallback,
 )
-from eodag.utils.instrumentation.eodag.package import _instruments
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 from opentelemetry.metrics import (
@@ -50,6 +49,7 @@ from opentelemetry.util import types
 from pydantic import ValidationError as pydanticValidationError
 from requests import Response
 
+from opentelemetry.instrumentation.eodag.package import _instruments
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 
 logger = logging.getLogger("eodag.utils.instrumentation.eodag")
