@@ -79,4 +79,3 @@ To run the entire tests (units, integration and end-to-end):
       these versions installed before you run tox. You can use
       `pyenv <https://github.com/pyenv/pyenv>`_ to manage many different versions
       of python
-
