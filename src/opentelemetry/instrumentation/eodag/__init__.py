@@ -19,14 +19,25 @@
 import functools
 import logging
 from timeit import default_timer
-from typing import Any, Callable, Collection, Dict, Iterable, List, Optional
+from typing import Any, Callable, Collection, Dict, Iterable, List, Optional, Union
 
 from eodag import EODataAccessGateway
+from eodag.api.product import EOProduct
+from eodag.config import PluginConfig
+from eodag.plugins.download import http
 from eodag.plugins.download.base import Download
 from eodag.plugins.search.qssearch import QueryStringSearch
-from eodag.rest import server
-from eodag.utils import ProgressCallback
+from eodag.rest.types.eodag_search import EODAGSearch
+from eodag.rest.types.stac_search import SearchPostRequest
+from eodag.rest.utils import format_pydantic_error
+from eodag.utils import (
+    DEFAULT_DOWNLOAD_TIMEOUT,
+    DEFAULT_DOWNLOAD_WAIT,
+    ProgressCallback,
+)
 from eodag.utils.instrumentation.eodag.package import _instruments
+from fastapi import Request
+from fastapi.responses import StreamingResponse
 from opentelemetry.metrics import (
     CallbackOptions,
     Counter,
@@ -35,6 +46,8 @@ from opentelemetry.metrics import (
     get_meter,
 )
 from opentelemetry.trace import SpanKind, Tracer, get_tracer
+from opentelemetry.util import types
+from pydantic import ValidationError as pydanticValidationError
 from requests import Response
 
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
@@ -49,24 +62,24 @@ class OverheadTimer:
     stop_global_timer functions. The sub-tasks record their time with the
     record_subtask_time function."""
 
-    def __init__(self) -> None:
-        self._start_global_timestamp: float = None
-        self._end_global_timestamp: float = None
-        self._subtasks_time: float = 0.0
+    # All the timer are in seconds
+    _start_global_timestamp: Optional[float] = None
+    _end_global_timestamp: Optional[float] = None
+    _subtasks_time: float = 0.0
 
     def start_global_timer(self) -> None:
         """Start the timer of the main task."""
-        self._start_global_timestamp: float = default_timer()
-        self._subtasks_time: float = 0.0
+        self._start_global_timestamp = default_timer()
+        self._subtasks_time = 0.0
 
     def stop_global_timer(self) -> None:
         """Stop the timer of the main task."""
-        self._end_global_timestamp: float = default_timer()
+        self._end_global_timestamp = default_timer()
 
     def record_subtask_time(self, time: float):
         """Record the execution time of a subtask.
 
-        :param time: Duration of the subtask.
+        :param time: Duration of the subtask in seconds.
         :type time: float
         """
         self._subtasks_time += time
@@ -74,15 +87,17 @@ class OverheadTimer:
     def get_global_time(self) -> float:
         """Returns the execution time of the main task.
 
-        :returns: The global execution time.
+        :returns: The global execution time in seconds.
         :rtype: float
         """
+        if not self._end_global_timestamp or not self._start_global_timestamp:
+            return 0.0
         return self._end_global_timestamp - self._start_global_timestamp
 
     def get_subtasks_time(self) -> float:
         """Returns the cumulative time of the sub-tasks.
 
-        :returns: The sub-tasks execution time.
+        :returns: The sub-tasks execution time in seconds.
         :rtype: float
         """
         return self._subtasks_time
@@ -90,17 +105,21 @@ class OverheadTimer:
     def get_overhead_time(self) -> float:
         """Returns the overhead time of the main task relative to the sub-tasks.
 
-        :returns: The overhead time.
+        :returns: The overhead time in seconds.
         :rtype: float
         """
         return self.get_global_time() - self._subtasks_time
+
+
+overhead_timers: Dict[int, OverheadTimer] = {}
+trace_attributes: Dict[int, Any] = {}
 
 
 def _instrument_search(
     tracer: Tracer,
     searched_product_types_counter: Counter,
     request_duration_seconds: Histogram,
-    outbound_request_duration_seconds_histogram: Histogram,
+    outbound_request_duration_seconds: Histogram,
     request_overhead_duration_seconds: Histogram,
 ) -> None:
     """Add the instrumentation for search operations in server mode.
@@ -111,45 +130,39 @@ def _instrument_search(
     :type searched_product_types_counter: Counter
     :param request_duration_seconds: Request duration histogram.
     :type request_duration_seconds: Histogram
-    :param outbound_request_duration_seconds_histogram: Outbound request duration histogram.
-    :type outbound_request_duration_seconds_histogram: Histogram
+    :param outbound_request_duration_seconds: Outbound request duration histogram.
+    :type outbound_request_duration_seconds: Histogram
     :param request_overhead_duration_seconds: EODAG overhead histogram.
     :type request_overhead_duration_seconds: Histogram
     """
-    overhead_timers: Dict[str, OverheadTimer] = {}
-    trace_attributes: Dict[str, Any] = {}
+    from eodag.rest import server
+
+    # Wrapping server.search_stac_items
 
     wrapped_server_search_stac_items = server.search_stac_items
 
     @functools.wraps(wrapped_server_search_stac_items)
     def wrapper_server_search_stac_items(
-        url: str,
-        arguments: Dict[str, Any],
-        root: str = "/",
-        catalogs: List[str] = [],
-        provider: Optional[str] = None,
-        method: Optional[str] = "GET",
+        request: Request,
+        search_request: SearchPostRequest,
+        catalogs: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-
-        # use catalogs from path or if it is empty, collections from args
-        collections = arguments.get("collections", None)
-        product_type = None
-        if catalogs:
-            product_type = catalogs[0]
-        elif collections:
-            if isinstance(collections, str):
-                product_type = collections.split(",")[0] if collections else None
-            elif isinstance(collections, list) and len(collections) > 0:
-                product_type = collections[0]
-            if not product_type:
-                logger.warning("Collections argument type should be Array")
+        try:
+            eodag_args = EODAGSearch.model_validate(
+                search_request.model_dump(exclude_none=True),
+                context={"isCatalog": bool(catalogs)},
+            )
+        except pydanticValidationError as e:
+            raise pydanticValidationError(format_pydantic_error(e)) from e
 
         span_name = "core-search"
-        attributes = {}
-        if provider:
-            attributes["provider"] = provider
-        if product_type:
-            attributes["product_type"] = product_type
+        attributes: types.Attributes = {
+            "operation": "search",
+            "product_type": eodag_args.productType,
+        }
+        # The provider is optional
+        if eodag_args.provider:
+            attributes["provider"] = eodag_args.provider
 
         with tracer.start_as_current_span(
             span_name, kind=SpanKind.CLIENT, attributes=attributes
@@ -164,7 +177,7 @@ def _instrument_search(
             # Call wrapped function
             try:
                 result = wrapped_server_search_stac_items(
-                    url, arguments, root, catalogs, provider, method
+                    request, search_request, catalogs
                 )
             except Exception as exc:
                 exception = exc
@@ -182,8 +195,11 @@ def _instrument_search(
             request_duration_seconds.record(
                 timer.get_global_time(), attributes=attributes
             )
+            overhead_attributes = {
+                k: v for k, v in attributes.items() if k != "product_type"
+            }
             request_overhead_duration_seconds.record(
-                timer.get_overhead_time(), attributes=attributes
+                timer.get_overhead_time(), attributes=overhead_attributes
             )
             del overhead_timers[trace_id]
             del trace_attributes[trace_id]
@@ -196,21 +212,21 @@ def _instrument_search(
     wrapper_server_search_stac_items.opentelemetry_instrumentation_eodag_applied = True
     server.search_stac_items = wrapper_server_search_stac_items
 
+    # Wrapping QueryStringSearch
+
     wrapped_qssearch_request = QueryStringSearch._request
 
     @functools.wraps(wrapped_qssearch_request)
     def wrapper_qssearch_request(
-        self,
+        self: QueryStringSearch,
         url: str,
         info_message: Optional[str] = None,
         exception_message: Optional[str] = None,
     ) -> Response:
-
         span_name = "core-search"
-        # This is the provider's product type.
+        # Don't use there the provider's product type.
         attributes = {
             "provider": self.provider,
-            "product_type": self.product_type_def_params["productType"],
         }
 
         with tracer.start_as_current_span(
@@ -218,10 +234,16 @@ def _instrument_search(
         ) as span:
             exception = None
             trace_id = span.get_span_context().trace_id
+            # Note: `overhead_timers` and `trace_attributes` are populated on a search or
+            # download operation.
+            # If this wrapper is called after a different operation, then both `timer` and
+            # `parent_attributes` are not available and no metric is generated.
             timer = overhead_timers.get(trace_id)
             parent_attributes = trace_attributes.get(trace_id)
-            parent_attributes["provider"] = self.provider
-            attributes = parent_attributes
+            if parent_attributes:
+                parent_attributes["provider"] = self.provider
+                # Get the EODAG's product type from the parent
+                attributes = parent_attributes
 
             start_time = default_timer()
 
@@ -232,15 +254,15 @@ def _instrument_search(
                 )
             except Exception as exc:
                 exception = exc
+                if exception.status_code:
+                    attributes["status_code"] = exception.status_code
             finally:
                 elapsed_time = default_timer() - start_time
 
             # Duration histograms
-            # If the search is called by an operation other than the download, then no
-            # timer is created and the metric is not generated.
             if timer:
                 timer.record_subtask_time(elapsed_time)
-                outbound_request_duration_seconds_histogram.record(
+                outbound_request_duration_seconds.record(
                     elapsed_time, attributes=attributes
                 )
 
@@ -253,7 +275,13 @@ def _instrument_search(
     QueryStringSearch._request = wrapper_qssearch_request
 
 
-def _instrument_download(tracer: Tracer, downloaded_data_counter: Counter):
+def _instrument_download(
+    tracer: Tracer,
+    downloaded_data_counter: Counter,
+    request_duration_seconds: Histogram,
+    outbound_request_duration_seconds: Histogram,
+    request_overhead_duration_seconds: Histogram,
+) -> None:
     """Add the instrumentation for download operations in server mode.
 
     :param tracer: OpenTelemetry tracer.
@@ -261,6 +289,145 @@ def _instrument_download(tracer: Tracer, downloaded_data_counter: Counter):
     :param downloaded_data_counter: Downloaded data counter.
     :type downloaded_data_counter: Counter
     """
+    from eodag.rest import server
+
+    # Wrapping server.download_stac_item
+
+    wrapped_server_download_stac_item = server.download_stac_item
+
+    @functools.wraps(wrapped_server_download_stac_item)
+    def wrapper_server_download_stac_item(
+        request: Request,
+        catalogs: List[str],
+        item_id: str,
+        provider: Optional[str] = None,
+        asset: Optional[str] = None,
+        **kwargs: Any,
+    ) -> StreamingResponse:
+        span_name = "core-download"
+        attributes = {
+            "operation": "download",
+            "product_type": catalogs[0],
+        }
+        if provider:
+            attributes["provider"] = provider
+
+        with tracer.start_as_current_span(
+            span_name, kind=SpanKind.CLIENT, attributes=attributes
+        ) as span:
+            exception = None
+            trace_id = span.get_span_context().trace_id
+            timer = OverheadTimer()
+            overhead_timers[trace_id] = timer
+            trace_attributes[trace_id] = attributes
+            timer.start_global_timer()
+
+            # Call wrapped function
+            try:
+                result = wrapped_server_download_stac_item(
+                    request, catalogs, item_id, provider, asset, **kwargs
+                )
+            except Exception as exc:
+                exception = exc
+            finally:
+                timer.stop_global_timer()
+
+            # Retrieve possible updated attributes
+            attributes = trace_attributes[trace_id]
+            span.set_attributes(attributes)
+
+            # Duration histograms
+            request_duration_seconds.record(
+                timer.get_global_time(), attributes=attributes
+            )
+            overhead_attributes = {
+                k: v for k, v in attributes.items() if k != "product_type"
+            }
+            request_overhead_duration_seconds.record(
+                timer.get_overhead_time(), attributes=overhead_attributes
+            )
+            del overhead_timers[trace_id]
+            del trace_attributes[trace_id]
+
+            if exception is not None:
+                raise exception.with_traceback(exception.__traceback__)
+
+        return result
+
+    wrapped_server_download_stac_item.opentelemetry_instrumentation_eodag_applied = True
+    server.download_stac_item = wrapper_server_download_stac_item
+
+    # Wrapping http.HTTPDownload._stream_download_dict
+
+    wrapped_http_HTTPDownload_stream_download_dict = (
+        http.HTTPDownload._stream_download_dict
+    )
+
+    @functools.wraps(wrapped_http_HTTPDownload_stream_download_dict)
+    def wrapper_http_HTTPDownload_stream_download_dict(
+        self,
+        product: EOProduct,
+        auth: Optional[PluginConfig] = None,
+        progress_callback: Optional[ProgressCallback] = None,
+        wait: int = DEFAULT_DOWNLOAD_WAIT,
+        timeout: int = DEFAULT_DOWNLOAD_TIMEOUT,
+        **kwargs: Union[str, bool, Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        span_name = "core-download"
+        # Don't use there the provider's product type.
+        attributes = {
+            "provider": product.provider,
+        }
+
+        with tracer.start_as_current_span(
+            span_name, kind=SpanKind.CLIENT, attributes=attributes
+        ) as span:
+            exception = None
+            trace_id = span.get_span_context().trace_id
+            # Note: `overhead_timers` and `trace_attributes` are populated on a search or
+            # download operation.
+            # If this wrapper is called after a different operation, then both `timer` and
+            # `parent_attributes` are not available and no metric is generated.
+            timer = overhead_timers.get(trace_id)
+            parent_attributes = trace_attributes.get(trace_id)
+            if parent_attributes:
+                parent_attributes["provider"] = self.provider
+                # Get the EODAG's product type from the parent
+                attributes = parent_attributes
+
+            start_time = default_timer()
+
+            # Call wrapped function
+            try:
+                result = wrapped_http_HTTPDownload_stream_download_dict(
+                    self, product, auth, progress_callback, wait, timeout, **kwargs
+                )
+            except Exception as exc:
+                exception = exc
+            finally:
+                elapsed_time = default_timer() - start_time
+
+            # Duration histograms
+            if timer:
+                timer.record_subtask_time(elapsed_time)
+                outbound_request_duration_seconds.record(
+                    elapsed_time, attributes=attributes
+                )
+
+        if exception is not None:
+            raise exception.with_traceback(exception.__traceback__)
+
+        return result
+
+    wrapper_http_HTTPDownload_stream_download_dict.opentelemetry_instrumentation_eodag_applied = (
+        True
+    )
+    http.HTTPDownload._stream_download_dict = (
+        wrapper_http_HTTPDownload_stream_download_dict
+    )
+
+    # Wrapping Download.progress_callback_decorator
+
     wrapped_progress_callback_decorator = Download.progress_callback_decorator
 
     @functools.wraps(wrapped_progress_callback_decorator)
@@ -291,6 +458,8 @@ class EODAGInstrumentor(BaseInstrumentor):
     def __init__(self, eodag_api: EODataAccessGateway = None) -> None:
         super().__init__()
         self._eodag_api = eodag_api
+        self._last_available_providers: List[str] = []
+        self._last_available_product_types: List[str] = []
 
     def instrumentation_dependencies(self) -> Collection[str]:
         """Return a list of python packages with versions that the will be instrumented.
@@ -309,12 +478,21 @@ class EODAGInstrumentor(BaseInstrumentor):
         :returns: The list observation.
         :rtype: Iterable[Observation]
         """
-        return [
+        new_available_providers: List[str] = self._eodag_api.available_providers()
+        observations_dict: Dict[str, int] = {
+            p: 0 for p in self._last_available_providers
+        }
+        for p in new_available_providers:
+            observations_dict[p] = 1
+        self._last_available_providers = new_available_providers
+        observations = [
             Observation(
-                len(self._eodag_api.available_providers()),
-                {"label": "Available Providers"},
+                v,
+                {"provider_id": k},
             )
+            for k, v in observations_dict.items()
         ]
+        return observations
 
     def _available_product_types_callback(
         self,
@@ -327,12 +505,23 @@ class EODAGInstrumentor(BaseInstrumentor):
         :returns: The list observation.
         :rtype: Iterable[Observation]
         """
-        return [
-            Observation(
-                len(self._eodag_api.list_product_types()),
-                {"label": "Available Product Types"},
-            )
+        new_available_product_types: List[str] = [
+            p["ID"] for p in self._eodag_api.list_product_types()
         ]
+        observations_dict: Dict[str, int] = {
+            p: 0 for p in self._last_available_product_types
+        }
+        for p in new_available_product_types:
+            observations_dict[p] = 1
+        self._last_available_product_types = new_available_product_types
+        observations = [
+            Observation(
+                v,
+                {"product_type_id": k},
+            )
+            for k, v in observations_dict.items()
+        ]
+        return observations
 
     def _instrument(self, **kwargs) -> None:
         """Instruments EODAG"""
@@ -353,16 +542,6 @@ class EODAGInstrumentor(BaseInstrumentor):
                 description="The number available product types",
             )
 
-        downloaded_data_counter = meter.create_counter(
-            name="eodag.download.downloaded_data_bytes_total",
-            description="Measure data downloaded from each provider and product type",
-        )
-        _instrument_download(tracer, downloaded_data_counter)
-
-        searched_product_types_counter = meter.create_counter(
-            name="eodag.core.searched_product_types_total",
-            description="The number of searches by provider and product type",
-        )
         request_duration_seconds = meter.create_histogram(
             name="eodag.server.request_duration_seconds",
             unit="s",
@@ -378,6 +557,23 @@ class EODAGInstrumentor(BaseInstrumentor):
             unit="s",
             description="Measure the duration of the EODAG overhead on the inbound HTTP request",
         )
+
+        downloaded_data_counter = meter.create_counter(
+            name="eodag.download.downloaded_data_bytes_total",
+            description="Measure data downloaded from each provider and product type",
+        )
+        _instrument_download(
+            tracer,
+            downloaded_data_counter,
+            request_duration_seconds,
+            outbound_request_duration_seconds,
+            request_overhead_duration_seconds,
+        )
+
+        searched_product_types_counter = meter.create_counter(
+            name="eodag.core.searched_product_types_total",
+            description="The number of searches by provider and product type",
+        )
         _instrument_search(
             tracer,
             searched_product_types_counter,
@@ -390,8 +586,11 @@ class EODAGInstrumentor(BaseInstrumentor):
         """Uninstrument the library.
 
         This only works if no other module also patches eodag"""
+        from eodag.rest import server
+
         patches = [
             (server, "search_stac_items"),
+            (server, "download_stac_item"),
             (QueryStringSearch, "_request"),
             (Download, "progress_callback_decorator"),
         ]
