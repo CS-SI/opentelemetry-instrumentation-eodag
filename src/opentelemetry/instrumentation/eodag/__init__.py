@@ -21,7 +21,12 @@ import logging
 from timeit import default_timer
 from typing import Any, Callable, Collection, Dict, Iterable, List, Optional
 
-from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
+from eodag import EODataAccessGateway
+from eodag.plugins.download.base import Download
+from eodag.plugins.search.qssearch import QueryStringSearch
+from eodag.rest import server
+from eodag.utils import ProgressCallback
+from eodag.utils.instrumentation.eodag.package import _instruments
 from opentelemetry.metrics import (
     CallbackOptions,
     Counter,
@@ -32,12 +37,7 @@ from opentelemetry.metrics import (
 from opentelemetry.trace import SpanKind, Tracer, get_tracer
 from requests import Response
 
-from eodag import EODataAccessGateway
-from eodag.plugins.download.base import Download
-from eodag.plugins.search.qssearch import QueryStringSearch
-from eodag.rest import server
-from eodag.utils import ProgressCallback
-from eodag.utils.instrumentation.eodag.package import _instruments
+from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 
 logger = logging.getLogger("eodag.utils.instrumentation.eodag")
 
