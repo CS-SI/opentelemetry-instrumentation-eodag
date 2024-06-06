@@ -1,0 +1,96 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "opentelemetry-instrumentation-eodag"
+version = "0.0.1"
+description = "OpenTelemetry EODAG Instrumentation"
+readme = "README.rst"
+authors = [
+    {name = "CS GROUP - France (CSSI)", email = "eodag@csgroup.space"},
+]
+license = {file = "LICENSE"}
+requires-python = ">=3.6"
+dependencies = [
+    "eodag[server]",
+    "opentelemetry-api",
+    "opentelemetry-sdk",
+]
+
+[project.urls]
+Homepage = "https://github.com/CS-SI/opentelemetry-instrumentation-eodag"
+Repository = "https://github.com/CS-SI/opentelemetry-instrumentation-eodag"
+Issues = "https://github.com/CS-SI/opentelemetry-instrumentation-eodag/issues/"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "pytest-html",
+    "pytest-xdist",
+    "pytest-socket",
+    "pytest-instafail",
+    "tox",
+    "wheel",
+    "twine",
+    "flake8",
+    "Flake8-pyproject",
+    "pre-commit",
+]
+instruments = [
+    "eodag[server]",
+]
+
+[project.entry-points.opentelemetry_instrumentor]
+eodag = "opentelemetry.instrumentation.eodag:EODAGInstrumentor"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+exclude = [
+    "*.tests",
+    "*.tests.*",
+    "tests.*",
+    "tests",
+]
+
+[tool.setuptools.package-data]
+"*" = [
+    "LICENSE",
+    "NOTICE",
+    "py.typed",
+]
+
+[tool.flake8]
+ignore = ["E203", "W503"]
+max_line_length = 120
+exclude = [
+    ".git",
+    "__pycache__",
+    ".tox",
+    "build",
+    "dist",
+    "docs/conf.py",
+    "tests/context.py",
+]
+
+[tool.isort]
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+line_length = 88
+ensure_newline_before_comments = true
+known_first_party = "tests"
+known_third_party = "concurrent.futures"
+default_section = "THIRDPARTY"
+
+[tool.pydocstyle]
+# Check for docstring presence only
+select = "D1"
+add_ignore = ["D107", "D100", "D105"]
+# Don't require docstrings for tests or setup
+match = '(?!test|setup).*\.py'
