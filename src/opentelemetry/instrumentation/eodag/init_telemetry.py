@@ -15,7 +15,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Programmatically instrument the EODAG server."""
+"""Programmatically instrument the EODAG server.
+
+Set the the variable OTEL_EXPORTER_OTLP_ENDPOINT and optionally OTEL_METRIC_EXPORT_INTERVAL before launching
+the EODAG server:
+
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318"
+export OTEL_METRIC_EXPORT_INTERVAL="5000"
+
+"""
 from __future__ import annotations
 
 import logging
