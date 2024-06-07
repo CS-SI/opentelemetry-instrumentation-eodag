@@ -15,7 +15,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""OpenTelemetry auto-instrumentation for EODAG in server mode"""
+"""OpenTelemetry auto-instrumentation for EODAG in server mode."""
 import functools
 import logging
 from timeit import default_timer
@@ -37,6 +37,7 @@ from eodag.utils import (
 )
 from fastapi import Request
 from fastapi.responses import StreamingResponse
+from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.metrics import (
     CallbackOptions,
     Counter,
@@ -50,7 +51,6 @@ from pydantic import ValidationError as pydanticValidationError
 from requests import Response
 
 from opentelemetry.instrumentation.eodag.package import _instruments
-from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 
 logger = logging.getLogger("eodag.utils.instrumentation.eodag")
 
@@ -60,7 +60,8 @@ class OverheadTimer:
 
     The main task starts and stops the global timer with the start_global_timer and
     stop_global_timer functions. The sub-tasks record their time with the
-    record_subtask_time function."""
+    record_subtask_time function.
+    """
 
     # All the timer are in seconds
     _start_global_timestamp: Optional[float] = None
@@ -85,7 +86,7 @@ class OverheadTimer:
         self._subtasks_time += time
 
     def get_global_time(self) -> float:
-        """Returns the execution time of the main task.
+        """Return the execution time of the main task.
 
         :returns: The global execution time in seconds.
         :rtype: float
@@ -95,7 +96,7 @@ class OverheadTimer:
         return self._end_global_timestamp - self._start_global_timestamp
 
     def get_subtasks_time(self) -> float:
-        """Returns the cumulative time of the sub-tasks.
+        """Return the cumulative time of the sub-tasks.
 
         :returns: The sub-tasks execution time in seconds.
         :rtype: float
@@ -103,7 +104,7 @@ class OverheadTimer:
         return self._subtasks_time
 
     def get_overhead_time(self) -> float:
-        """Returns the overhead time of the main task relative to the sub-tasks.
+        """Return the overhead time of the main task relative to the sub-tasks.
 
         :returns: The overhead time in seconds.
         :rtype: float
@@ -453,9 +454,16 @@ def _instrument_download(
 
 
 class EODAGInstrumentor(BaseInstrumentor):
-    """An instrumentor for EODAG"""
+    """An instrumentor for EODAG."""
 
     def __init__(self, eodag_api: EODataAccessGateway = None) -> None:
+        """Init the instrumentor for EODAG.
+
+        If `eodag_api` is given, instrument also the metrics that uses a callback (currently the gauges).
+
+        :param eodag_api: (optional) EODAG API
+        :type eodag_api: EODataAccessGateway
+        """
         super().__init__()
         self._eodag_api = eodag_api
         self._last_available_providers: List[str] = []
@@ -465,13 +473,14 @@ class EODAGInstrumentor(BaseInstrumentor):
         """Return a list of python packages with versions that the will be instrumented.
 
         :returns: The list of instrumented python packages.
-        :rtype: Collection[str]"""
+        :rtype: Collection[str]
+        """
         return _instruments
 
     def _available_providers_callback(
         self, options: CallbackOptions
     ) -> Iterable[Observation]:
-        """OpenTelemetry callback to measure the number of available providers.
+        """Open Telemetry callback to measure the number of available providers.
 
         :param options: Options for the callback.
         :type options: CallbackOptions
@@ -498,15 +507,16 @@ class EODAGInstrumentor(BaseInstrumentor):
         self,
         options: CallbackOptions,
     ) -> Iterable[Observation]:
-        """OpenTelemetry callback to measure the number of available product types.
+        """Open Telemetry callback to measure the number of available product types.
 
         :param options: Options for the callback.
         :type options: CallbackOptions
         :returns: The list observation.
         :rtype: Iterable[Observation]
         """
+        # Don't fetch providers to avoid rebuilding the index concurrently
         new_available_product_types: List[str] = [
-            p["ID"] for p in self._eodag_api.list_product_types()
+            p["ID"] for p in self._eodag_api.list_product_types(fetch_providers=False)
         ]
         observations_dict: Dict[str, int] = {
             p: 0 for p in self._last_available_product_types
@@ -524,7 +534,7 @@ class EODAGInstrumentor(BaseInstrumentor):
         return observations
 
     def _instrument(self, **kwargs) -> None:
-        """Instruments EODAG"""
+        """Instruments EODAG."""
         tracer_provider = kwargs.get("tracer_provider")
         tracer = get_tracer(__name__, tracer_provider=tracer_provider)
         meter_provider = kwargs.get("meter_provider")
@@ -585,7 +595,8 @@ class EODAGInstrumentor(BaseInstrumentor):
     def _uninstrument(self, **kwargs) -> None:
         """Uninstrument the library.
 
-        This only works if no other module also patches eodag"""
+        This only works if no other module also patches eodag.
+        """
         from eodag.rest import server
 
         patches = [
