@@ -23,17 +23,19 @@ from typing import Any, Callable, Collection, Dict, Iterable, List, Optional, Un
 
 from eodag import EODataAccessGateway
 from eodag.api.product import EOProduct
-from eodag.config import PluginConfig
 from eodag.plugins.download import http
 from eodag.plugins.download.base import Download
+from eodag.plugins.search import PreparedSearch
 from eodag.plugins.search.qssearch import QueryStringSearch
 from eodag.rest.types.eodag_search import EODAGSearch
 from eodag.rest.types.stac_search import SearchPostRequest
 from eodag.rest.utils import format_pydantic_error
+from eodag.types.download_args import DownloadConf
 from eodag.utils import (
     DEFAULT_DOWNLOAD_TIMEOUT,
     DEFAULT_DOWNLOAD_WAIT,
     ProgressCallback,
+    Unpack,
 )
 from fastapi import Request
 from fastapi.responses import StreamingResponse
@@ -49,6 +51,7 @@ from opentelemetry.trace import SpanKind, Tracer, get_tracer
 from opentelemetry.util import types
 from pydantic import ValidationError as pydanticValidationError
 from requests import Response
+from requests.auth import AuthBase
 
 from opentelemetry.instrumentation.eodag.package import _instruments
 
@@ -220,9 +223,7 @@ def _instrument_search(
     @functools.wraps(wrapped_qssearch_request)
     def wrapper_qssearch_request(
         self: QueryStringSearch,
-        url: str,
-        info_message: Optional[str] = None,
-        exception_message: Optional[str] = None,
+        prep: PreparedSearch,
     ) -> Response:
         span_name = "core-search"
         # Don't use there the provider's product type.
@@ -250,9 +251,7 @@ def _instrument_search(
 
             # Call wrapped function
             try:
-                result = wrapped_qssearch_request(
-                    self, url, info_message, exception_message
-                )
+                result = wrapped_qssearch_request(self, prep)
             except Exception as exc:
                 exception = exc
                 if exception.status_code:
@@ -368,11 +367,11 @@ def _instrument_download(
     def wrapper_http_HTTPDownload_stream_download_dict(
         self,
         product: EOProduct,
-        auth: Optional[PluginConfig] = None,
+        auth: Optional[Union[AuthBase, Dict[str, str]]] = None,
         progress_callback: Optional[ProgressCallback] = None,
         wait: int = DEFAULT_DOWNLOAD_WAIT,
         timeout: int = DEFAULT_DOWNLOAD_TIMEOUT,
-        **kwargs: Union[str, bool, Dict[str, Any]],
+        **kwargs: Unpack[DownloadConf],
     ) -> Dict[str, Any]:
         span_name = "core-download"
         # Don't use there the provider's product type.
