@@ -43,7 +43,8 @@
             "fieldConfig": {
                 "defaults": {
                     "color": {
-                        "mode": "continuous-GrYlRd",
+                        "fixedColor": "purple",
+                        "mode": "fixed",
                         "seriesBy": "last"
                     },
                     "custom": {
@@ -51,7 +52,7 @@
                         "axisCenteredZero": false,
                         "axisColorMode": "text",
                         "axisLabel": "",
-                        "axisPlacement": "auto",
+                        "axisPlacement": "left",
                         "barAlignment": 0,
                         "drawStyle": "line",
                         "fillOpacity": 0,
@@ -63,12 +64,15 @@
                         },
                         "insertNulls": false,
                         "lineInterpolation": "linear",
+                        "lineStyle": {
+                            "fill": "solid"
+                        },
                         "lineWidth": 1,
-                        "pointSize": 5,
+                        "pointSize": 1,
                         "scaleDistribution": {
                             "type": "linear"
                         },
-                        "showPoints": "auto",
+                        "showPoints": "never",
                         "spanNulls": false,
                         "stacking": {
                             "group": "A",
@@ -78,6 +82,7 @@
                             "mode": "off"
                         }
                     },
+                    "fieldMinMax": false,
                     "mappings": [],
                     "thresholds": {
                         "mode": "absolute",
@@ -107,7 +112,7 @@
                     "calcs": [],
                     "displayMode": "list",
                     "placement": "bottom",
-                    "showLegend": true
+                    "showLegend": false
                 },
                 "tooltip": {
                     "mode": "single",
@@ -138,8 +143,8 @@
             "fieldConfig": {
                 "defaults": {
                     "color": {
-                        "fixedColor": "blue",
-                        "mode": "continuous-BlPu",
+                        "fixedColor": "purple",
+                        "mode": "fixed",
                         "seriesBy": "last"
                     },
                     "custom": {
@@ -151,7 +156,7 @@
                         "barAlignment": 0,
                         "drawStyle": "line",
                         "fillOpacity": 0,
-                        "gradientMode": "none",
+                        "gradientMode": "scheme",
                         "hideFrom": {
                             "legend": false,
                             "tooltip": false,
@@ -224,7 +229,7 @@
                         "uid": "bd7262f6-e0cb-4e22-accc-87b2043adc61"
                     },
                     "editorMode": "code",
-                    "expr": "histogram_quantile(0.95, sum(rate(eodag_otelcol_exporter_eodag_server_request_overhead_duration_seconds_bucket[1h])) by (le) )",
+                    "expr": "histogram_quantile(0.95, sum(rate(eodag_otelcol_exporter_eodag_server_request_overhead_duration_seconds_bucket[5m])) by (le) )",
                     "instant": false,
                     "legendFormat": "__auto",
                     "range": true,
@@ -314,7 +319,7 @@
                         "uid": "bd7262f6-e0cb-4e22-accc-87b2043adc61"
                     },
                     "editorMode": "code",
-                    "expr": "sum(\n  increase(eodag_otelcol_exporter_eodag_server_request_duration_seconds_bucket[$__interval])\n  )\nby (le)\n",
+                    "expr": "sum(\n  rate(eodag_otelcol_exporter_eodag_server_request_duration_seconds_bucket[5m])\n  )\nby (le)\n",
                     "format": "heatmap",
                     "instant": false,
                     "legendFormat": "{{le}}",
@@ -959,13 +964,13 @@
         ]
     },
     "time": {
-        "from": "now-6h",
+        "from": "now-3h",
         "to": "now"
     },
     "timepicker": {},
     "timezone": "",
     "title": "EODAG",
     "uid": "c16a1ab0-9a97-45aa-b21e-b9103ab60142",
-    "version": 1,
+    "version": 3,
     "weekStart": ""
 }
