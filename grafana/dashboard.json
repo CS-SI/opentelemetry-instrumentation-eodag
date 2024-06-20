@@ -394,7 +394,7 @@
                     },
                     "editorMode": "code",
                     "exemplar": false,
-                    "expr": "topk(1, sum(eodag_otelcol_exporter_eodag_core_available_providers))",
+                    "expr": "topk(1, sum(eodag_otelcol_exporter_eodag_core_available_providers) by (instance))",
                     "instant": true,
                     "legendFormat": "{{label_name}}",
                     "range": false,
