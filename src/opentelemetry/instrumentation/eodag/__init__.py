@@ -150,12 +150,10 @@ def _instrument_search(
     def wrapper_server_search_stac_items(
         request: Request,
         search_request: SearchPostRequest,
-        catalogs: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         try:
             eodag_args = EODAGSearch.model_validate(
-                search_request.model_dump(exclude_none=True),
-                context={"isCatalog": bool(catalogs)},
+                search_request.model_dump(exclude_none=True)
             )
         except pydanticValidationError as e:
             raise pydanticValidationError(format_pydantic_error(e)) from e
@@ -181,9 +179,7 @@ def _instrument_search(
 
             # Call wrapped function
             try:
-                result = wrapped_server_search_stac_items(
-                    request, search_request, catalogs
-                )
+                result = wrapped_server_search_stac_items(request, search_request)
             except Exception as exc:
                 exception = exc
             finally:
@@ -299,16 +295,16 @@ def _instrument_download(
     @functools.wraps(wrapped_server_download_stac_item)
     def wrapper_server_download_stac_item(
         request: Request,
-        catalogs: List[str],
+        collection_id: str,
         item_id: str,
         provider: Optional[str] = None,
         asset: Optional[str] = None,
         **kwargs: Any,
-    ) -> Response:
+) -> Response:
         span_name = "core-download"
         attributes = {
             "operation": "download",
-            "product_type": catalogs[0],
+            "product_type": collection_id,
         }
         if provider:
             attributes["provider"] = provider
@@ -326,7 +322,7 @@ def _instrument_download(
             # Call wrapped function
             try:
                 result = wrapped_server_download_stac_item(
-                    request, catalogs, item_id, provider, asset, **kwargs
+                    request, collection_id, item_id, provider, asset, **kwargs
                 )
             except Exception as exc:
                 exception = exc
