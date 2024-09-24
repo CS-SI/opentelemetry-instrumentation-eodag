@@ -35,6 +35,7 @@ from eodag.utils import (
     DEFAULT_DOWNLOAD_TIMEOUT,
     DEFAULT_DOWNLOAD_WAIT,
     ProgressCallback,
+    StreamResponse,
     Unpack,
 )
 from fastapi import Request
@@ -303,7 +304,7 @@ def _instrument_download(
         provider: Optional[str] = None,
         asset: Optional[str] = None,
         **kwargs: Any,
-    ) -> StreamingResponse:
+    ) -> Response:
         span_name = "core-download"
         attributes = {
             "operation": "download",
@@ -372,7 +373,7 @@ def _instrument_download(
         wait: int = DEFAULT_DOWNLOAD_WAIT,
         timeout: int = DEFAULT_DOWNLOAD_TIMEOUT,
         **kwargs: Unpack[DownloadConf],
-    ) -> Dict[str, Any]:
+    ) -> StreamResponse:
         span_name = "core-download"
         # Don't use there the provider's product type.
         attributes = {
