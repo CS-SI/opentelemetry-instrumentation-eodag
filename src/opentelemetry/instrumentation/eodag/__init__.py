@@ -16,6 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """OpenTelemetry auto-instrumentation for EODAG in server mode."""
+from dataclasses import asdict
 import functools
 import logging
 from timeit import default_timer
@@ -39,7 +40,6 @@ from eodag.utils import (
     Unpack,
 )
 from fastapi import Request
-from fastapi.responses import StreamingResponse
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.metrics import (
     CallbackOptions,
@@ -376,6 +376,12 @@ def _instrument_download(
             "provider": product.provider,
         }
 
+        def _count(iter: Iterable[bytes]) -> Iterable[bytes]:
+            for chunk in iter:
+                increment = len(chunk)
+                downloaded_data_counter.add(increment, {"provider": product.provider, "product_type": product.product_type})
+                yield chunk
+
         with tracer.start_as_current_span(
             span_name, kind=SpanKind.CLIENT, attributes=attributes
         ) as span:
@@ -399,6 +405,7 @@ def _instrument_download(
                 result = wrapped_http_HTTPDownload_stream_download_dict(
                     self, product, auth, progress_callback, wait, timeout, **kwargs
                 )
+                content = _count(result.content)
             except Exception as exc:
                 exception = exc
             finally:
@@ -414,7 +421,7 @@ def _instrument_download(
         if exception is not None:
             raise exception.with_traceback(exception.__traceback__)
 
-        return result
+        return StreamResponse(**asdict(result), content=content)
 
     wrapper_http_HTTPDownload_stream_download_dict.opentelemetry_instrumentation_eodag_applied = (
         True
@@ -422,32 +429,6 @@ def _instrument_download(
     http.HTTPDownload._stream_download_dict = (
         wrapper_http_HTTPDownload_stream_download_dict
     )
-
-    # Wrapping Download.progress_callback_decorator
-
-    wrapped_progress_callback_decorator = Download.progress_callback_decorator
-
-    @functools.wraps(wrapped_progress_callback_decorator)
-    def wrapper_progress_callback_decorator(
-        self, progress_callback: ProgressCallback, **decorator_kwargs: Any
-    ) -> Callable[[Any, Any], None]:
-        @functools.wraps(progress_callback)
-        def progress_callback_wrapper(*args: Any, **kwargs: Any) -> None:
-            increment = args[0]
-            attributes = {
-                "provider": decorator_kwargs["provider"],
-                "product_type": decorator_kwargs["product_type"],
-            }
-            downloaded_data_counter.add(increment, attributes)
-            progress_callback(*args, **kwargs)
-
-        return progress_callback_wrapper
-
-    wrapper_progress_callback_decorator.opentelemetry_instrumentation_eodag_applied = (
-        True
-    )
-    Download.progress_callback_decorator = wrapper_progress_callback_decorator
-
 
 class EODAGInstrumentor(BaseInstrumentor):
     """An instrumentor for EODAG."""
