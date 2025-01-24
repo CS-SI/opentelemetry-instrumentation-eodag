@@ -16,11 +16,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """OpenTelemetry auto-instrumentation for EODAG in server mode."""
-from dataclasses import asdict
+
 import functools
 import logging
 from timeit import default_timer
-from typing import Any, Callable, Collection, Dict, Iterable, List, Optional, Union
+from typing import (
+    Any,
+    Collection,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Union,
+)
 
 from eodag import EODataAccessGateway
 from eodag.api.product import EOProduct
@@ -300,7 +308,7 @@ def _instrument_download(
         provider: Optional[str] = None,
         asset: Optional[str] = None,
         **kwargs: Any,
-) -> Response:
+    ) -> Response:
         span_name = "core-download"
         attributes = {
             "operation": "download",
@@ -362,7 +370,7 @@ def _instrument_download(
 
     @functools.wraps(wrapped_http_HTTPDownload_stream_download_dict)
     def wrapper_http_HTTPDownload_stream_download_dict(
-        self,
+        self: http.HTTPDownload,
         product: EOProduct,
         auth: Optional[Union[AuthBase, Dict[str, str]]] = None,
         progress_callback: Optional[ProgressCallback] = None,
@@ -379,7 +387,13 @@ def _instrument_download(
         def _count(iter: Iterable[bytes]) -> Iterable[bytes]:
             for chunk in iter:
                 increment = len(chunk)
-                downloaded_data_counter.add(increment, {"provider": product.provider, "product_type": product.product_type})
+                downloaded_data_counter.add(
+                    increment,
+                    {
+                        "provider": product.provider,
+                        "product_type": product.product_type,
+                    },
+                )
                 yield chunk
 
         with tracer.start_as_current_span(
@@ -421,14 +435,18 @@ def _instrument_download(
         if exception is not None:
             raise exception.with_traceback(exception.__traceback__)
 
-        return StreamResponse(**asdict(result), content=content)
+        return StreamResponse(
+            content=content,
+            headers=result.headers,
+            media_type=result.media_type,
+            status_code=result.status_code,
+        )
 
-    wrapper_http_HTTPDownload_stream_download_dict.opentelemetry_instrumentation_eodag_applied = (
-        True
-    )
+    wrapper_http_HTTPDownload_stream_download_dict.opentelemetry_instrumentation_eodag_applied = True
     http.HTTPDownload._stream_download_dict = (
         wrapper_http_HTTPDownload_stream_download_dict
     )
+
 
 class EODAGInstrumentor(BaseInstrumentor):
     """An instrumentor for EODAG."""
