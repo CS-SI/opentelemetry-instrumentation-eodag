@@ -32,7 +32,7 @@ from typing import (
 
 from eodag import EODataAccessGateway
 from eodag.api.product import EOProduct
-from eodag.plugins.download import http
+from eodag.plugins.download import http, aws
 from eodag.plugins.download.base import Download
 from eodag.plugins.search import PreparedSearch
 from eodag.plugins.search.qssearch import QueryStringSearch
@@ -362,6 +362,18 @@ def _instrument_download(
     wrapped_server_download_stac_item.opentelemetry_instrumentation_eodag_applied = True
     server.download_stac_item = wrapper_server_download_stac_item
 
+    def _count(iter: Iterable[bytes], product: EOProduct) -> Iterable[bytes]:
+        for chunk in iter:
+            increment = len(chunk)
+            downloaded_data_counter.add(
+                increment,
+                {
+                    "provider": product.provider,
+                    "product_type": product.product_type,
+                },
+            )
+            yield chunk
+
     # Wrapping http.HTTPDownload._stream_download_dict
 
     wrapped_http_HTTPDownload_stream_download_dict = (
@@ -383,18 +395,6 @@ def _instrument_download(
         attributes = {
             "provider": product.provider,
         }
-
-        def _count(iter: Iterable[bytes]) -> Iterable[bytes]:
-            for chunk in iter:
-                increment = len(chunk)
-                downloaded_data_counter.add(
-                    increment,
-                    {
-                        "provider": product.provider,
-                        "product_type": product.product_type,
-                    },
-                )
-                yield chunk
 
         with tracer.start_as_current_span(
             span_name, kind=SpanKind.CLIENT, attributes=attributes
@@ -419,7 +419,7 @@ def _instrument_download(
                 result = wrapped_http_HTTPDownload_stream_download_dict(
                     self, product, auth, progress_callback, wait, timeout, **kwargs
                 )
-                content = _count(result.content)
+                content = _count(result.content, product)
             except Exception as exc:
                 exception = exc
             finally:
@@ -445,6 +445,79 @@ def _instrument_download(
     wrapper_http_HTTPDownload_stream_download_dict.opentelemetry_instrumentation_eodag_applied = True
     http.HTTPDownload._stream_download_dict = (
         wrapper_http_HTTPDownload_stream_download_dict
+    )
+
+     # Wrapping aws.AwsDownload._stream_download_dict
+
+    wrapped_aws_AwsDownload_stream_download_dict = (
+        aws.AwsDownload._stream_download_dict
+    )
+
+    @functools.wraps(wrapped_aws_AwsDownload_stream_download_dict)
+    def wrapper_aws_AwsDownload_stream_download_dict(
+        self: aws.AwsDownload,
+        product: EOProduct,
+        auth: Optional[Union[AuthBase, Dict[str, str]]] = None,
+        progress_callback: Optional[ProgressCallback] = None,
+        wait: int = DEFAULT_DOWNLOAD_WAIT,
+        timeout: int = DEFAULT_DOWNLOAD_TIMEOUT,
+        **kwargs: Unpack[DownloadConf],
+    ) -> StreamResponse:
+        span_name = "core-download"
+        # Don't use there the provider's product type.
+        attributes = {
+            "provider": product.provider,
+        }
+
+        with tracer.start_as_current_span(
+            span_name, kind=SpanKind.CLIENT, attributes=attributes
+        ) as span:
+            exception = None
+            trace_id = span.get_span_context().trace_id
+            # Note: `overhead_timers` and `trace_attributes` are populated on a search or
+            # download operation.
+            # If this wrapper is called after a different operation, then both `timer` and
+            # `parent_attributes` are not available and no metric is generated.
+            timer = overhead_timers.get(trace_id)
+            parent_attributes = trace_attributes.get(trace_id)
+            if parent_attributes:
+                parent_attributes["provider"] = self.provider
+                # Get the EODAG's product type from the parent
+                attributes = parent_attributes
+
+            start_time = default_timer()
+
+            # Call wrapped function
+            try:
+                result = wrapped_aws_AwsDownload_stream_download_dict(
+                    self, product, auth, progress_callback, wait, timeout, **kwargs
+                )
+                content = _count(result.content, product)
+            except Exception as exc:
+                exception = exc
+            finally:
+                elapsed_time = default_timer() - start_time
+
+            # Duration histograms
+            if timer:
+                timer.record_subtask_time(elapsed_time)
+                outbound_request_duration_seconds.record(
+                    elapsed_time, attributes=attributes
+                )
+
+        if exception is not None:
+            raise exception.with_traceback(exception.__traceback__)
+
+        return StreamResponse(
+            content=content,
+            headers=result.headers,
+            media_type=result.media_type,
+            status_code=result.status_code,
+        )
+
+    wrapper_aws_AwsDownload_stream_download_dict.opentelemetry_instrumentation_eodag_applied = True
+    aws.AwsDownload._stream_download_dict = (
+        wrapper_aws_AwsDownload_stream_download_dict
     )
 
 
