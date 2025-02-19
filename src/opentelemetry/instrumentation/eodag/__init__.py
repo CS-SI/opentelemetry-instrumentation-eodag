@@ -283,6 +283,7 @@ def _instrument_search(
 def _instrument_download(
     tracer: Tracer,
     downloaded_data_counter: Counter,
+    number_downloads_counter: Counter,
     request_duration_seconds: Histogram,
     outbound_request_duration_seconds: Histogram,
     request_overhead_duration_seconds: Histogram,
@@ -395,6 +396,13 @@ def _instrument_download(
         attributes = {
             "provider": product.provider,
         }
+        number_downloads_counter.add(
+            1,
+            {
+                "provider": product.provider,
+                "product_type": product.product_type,
+            },
+        )
 
         with tracer.start_as_current_span(
             span_name, kind=SpanKind.CLIENT, attributes=attributes
@@ -468,6 +476,13 @@ def _instrument_download(
         attributes = {
             "provider": product.provider,
         }
+        number_downloads_counter.add(
+            1,
+            {
+                "provider": product.provider,
+                "product_type": product.product_type,
+            },
+        )
 
         with tracer.start_as_current_span(
             span_name, kind=SpanKind.CLIENT, attributes=attributes
@@ -640,9 +655,15 @@ class EODAGInstrumentor(BaseInstrumentor):
             name="eodag.download.downloaded_data_bytes_total",
             description="Measure data downloaded from each provider and product type",
         )
+        number_downloads_counter = meter.create_counter(
+            name="eodag.download.number_downloads",
+            description="Number of downloads from each provider and product type",
+        )
+
         _instrument_download(
             tracer,
             downloaded_data_counter,
+            number_downloads_counter,
             request_duration_seconds,
             outbound_request_duration_seconds,
             request_overhead_duration_seconds,
