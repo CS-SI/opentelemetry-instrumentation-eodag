@@ -47,7 +47,7 @@ from eodag.utils import (
     StreamResponse,
     Unpack,
 )
-from fastapi import Request
+from fastapi import HTTPException, Request
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.metrics import (
     CallbackOptions,
@@ -164,7 +164,7 @@ def _instrument_search(
                 search_request.model_dump(exclude_none=True)
             )
         except pydanticValidationError as e:
-            raise pydanticValidationError(format_pydantic_error(e)) from e
+            raise HTTPException(status_code=400, detail=format_pydantic_error(e)) from e
 
         span_name = "core-search"
         attributes: types.Attributes = {
