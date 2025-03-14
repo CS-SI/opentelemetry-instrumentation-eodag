@@ -20,24 +20,15 @@
 import functools
 import logging
 from timeit import default_timer
-from typing import (
-    Any,
-    Collection,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Union,
-)
+from typing import Any, Collection, Dict, Iterable, List, Optional, Union
 
 from eodag import EODataAccessGateway
 from eodag.api.product import EOProduct
-from eodag.plugins.download import http, aws
+from eodag.plugins.download import aws, http
 from eodag.plugins.download.base import Download
 from eodag.plugins.search import PreparedSearch
 from eodag.plugins.search.qssearch import QueryStringSearch
 from eodag.rest.types.eodag_search import EODAGSearch
-from eodag.rest.types.stac_search import SearchPostRequest
 from eodag.rest.utils import format_pydantic_error
 from eodag.types.download_args import DownloadConf
 from eodag.utils import (
@@ -61,6 +52,7 @@ from opentelemetry.util import types
 from pydantic import ValidationError as pydanticValidationError
 from requests import Response
 from requests.auth import AuthBase
+from stac_fastapi.types.search import BaseSearchPostRequest
 
 from opentelemetry.instrumentation.eodag.package import _instruments
 
@@ -148,16 +140,17 @@ def _instrument_search(
     :param request_overhead_duration_seconds: EODAG overhead histogram.
     :type request_overhead_duration_seconds: Histogram
     """
-    from eodag.rest import server
+    from stac_fastapi.eodag.core import EodagCoreClient as core_client
 
     # Wrapping server.search_stac_items
 
-    wrapped_server_search_stac_items = server.search_stac_items
+    wrapped_core__search_base = core_client._search_base
 
-    @functools.wraps(wrapped_server_search_stac_items)
-    def wrapper_server_search_stac_items(
+    @functools.wraps(wrapped_core__search_base)
+    def wrapper_core__search_base(
+        self: core_client,
+        search_request: BaseSearchPostRequest,
         request: Request,
-        search_request: SearchPostRequest,
     ) -> Dict[str, Any]:
         try:
             eodag_args = EODAGSearch.model_validate(
@@ -187,7 +180,7 @@ def _instrument_search(
 
             # Call wrapped function
             try:
-                result = wrapped_server_search_stac_items(request, search_request)
+                result = wrapped_core__search_base(self, search_request, request)
             except Exception as exc:
                 exception = exc
             finally:
@@ -218,8 +211,8 @@ def _instrument_search(
 
         return result
 
-    wrapper_server_search_stac_items.opentelemetry_instrumentation_eodag_applied = True
-    server.search_stac_items = wrapper_server_search_stac_items
+    wrapper_core__search_base.opentelemetry_instrumentation_eodag_applied = True
+    core_client._search_base = wrapper_core__search_base
 
     # Wrapping QueryStringSearch
 
@@ -450,16 +443,16 @@ def _instrument_download(
             status_code=result.status_code,
         )
 
-    wrapper_http_HTTPDownload_stream_download_dict.opentelemetry_instrumentation_eodag_applied = True
+    wrapper_http_HTTPDownload_stream_download_dict.opentelemetry_instrumentation_eodag_applied = (
+        True
+    )
     http.HTTPDownload._stream_download_dict = (
         wrapper_http_HTTPDownload_stream_download_dict
     )
 
-     # Wrapping aws.AwsDownload._stream_download_dict
+    # Wrapping aws.AwsDownload._stream_download_dict
 
-    wrapped_aws_AwsDownload_stream_download_dict = (
-        aws.AwsDownload._stream_download_dict
-    )
+    wrapped_aws_AwsDownload_stream_download_dict = aws.AwsDownload._stream_download_dict
 
     @functools.wraps(wrapped_aws_AwsDownload_stream_download_dict)
     def wrapper_aws_AwsDownload_stream_download_dict(
@@ -530,10 +523,10 @@ def _instrument_download(
             status_code=result.status_code,
         )
 
-    wrapper_aws_AwsDownload_stream_download_dict.opentelemetry_instrumentation_eodag_applied = True
-    aws.AwsDownload._stream_download_dict = (
-        wrapper_aws_AwsDownload_stream_download_dict
+    wrapper_aws_AwsDownload_stream_download_dict.opentelemetry_instrumentation_eodag_applied = (
+        True
     )
+    aws.AwsDownload._stream_download_dict = wrapper_aws_AwsDownload_stream_download_dict
 
 
 class EODAGInstrumentor(BaseInstrumentor):
