@@ -15,9 +15,13 @@ requires-python = ">=3.6"
 dependencies = [
     "eodag",
     "stac-fastapi.types",
-    "stac-fastapi-eodag @ git+https://gitlab.si.c-s.fr/aubin.lambare/stac-fastapi-eodag",
     "opentelemetry-api",
     "opentelemetry-sdk",
+]
+
+[project.optional-dependencies]
+instruments = [
+    "stac-fastapi-eodag @ git+https://gitlab.si.c-s.fr/aubin.lambare/stac-fastapi-eodag",
 ]
 
 [project.urls]
