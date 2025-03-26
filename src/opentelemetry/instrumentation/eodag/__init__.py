@@ -15,7 +15,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""OpenTelemetry auto-instrumentation for EODAG in server mode."""
+"""OpenTelemetry auto-instrumentation for stac fastapi eodag."""
 
 import functools
 import logging
@@ -127,7 +127,7 @@ def _instrument_search(
     outbound_request_duration_seconds: Histogram,
     request_overhead_duration_seconds: Histogram,
 ) -> None:
-    """Add the instrumentation for search operations in server mode.
+    """Add the instrumentation for search operations.
 
     :param tracer: OpenTelemetry tracer.
     :type tracer: Tracer
@@ -142,7 +142,7 @@ def _instrument_search(
     """
     from stac_fastapi.eodag.core import EodagCoreClient as core_client
 
-    # Wrapping server.search_stac_items
+    # Wrapping core_client._search_base
 
     wrapped_core__search_base = core_client._search_base
 
@@ -281,35 +281,36 @@ def _instrument_download(
     outbound_request_duration_seconds: Histogram,
     request_overhead_duration_seconds: Histogram,
 ) -> None:
-    """Add the instrumentation for download operations in server mode.
+    """Add the instrumentation for download operations.
 
     :param tracer: OpenTelemetry tracer.
     :type tracer: Tracer
     :param downloaded_data_counter: Downloaded data counter.
     :type downloaded_data_counter: Counter
     """
-    from eodag.rest import server
+    from stac_fastapi.eodag.extensions.data_download import (
+        BaseDataDownloadClient as download_client,
+    )
 
-    # Wrapping server.download_stac_item
+    # Wrapping download_client.get_data
 
-    wrapped_server_download_stac_item = server.download_stac_item
+    wrapped_download_client_get_data = download_client.get_data
 
-    @functools.wraps(wrapped_server_download_stac_item)
-    def wrapper_server_download_stac_item(
-        request: Request,
+    @functools.wraps(wrapped_download_client_get_data)
+    def wrapper_download_client_get_data(
+        federation_backend: str,
         collection_id: str,
         item_id: str,
-        provider: Optional[str] = None,
-        asset: Optional[str] = None,
-        **kwargs: Any,
+        asset_name: Optional[str],
+        request: Request,
     ) -> Response:
         span_name = "core-download"
         attributes = {
             "operation": "download",
             "product_type": collection_id,
         }
-        if provider:
-            attributes["provider"] = provider
+        if federation_backend:
+            attributes["provider"] = federation_backend
 
         with tracer.start_as_current_span(
             span_name, kind=SpanKind.CLIENT, attributes=attributes
@@ -323,8 +324,8 @@ def _instrument_download(
 
             # Call wrapped function
             try:
-                result = wrapped_server_download_stac_item(
-                    request, collection_id, item_id, provider, asset, **kwargs
+                result = wrapped_download_client_get_data(
+                    federation_backend, collection_id, item_id, asset_name, request
                 )
             except Exception as exc:
                 exception = exc
@@ -353,8 +354,8 @@ def _instrument_download(
 
         return result
 
-    wrapped_server_download_stac_item.opentelemetry_instrumentation_eodag_applied = True
-    server.download_stac_item = wrapper_server_download_stac_item
+    wrapped_download_client_get_data.opentelemetry_instrumentation_eodag_applied = True
+    download_client.get_data = wrapper_download_client_get_data
 
     def _count(iter: Iterable[bytes], product: EOProduct) -> Iterable[bytes]:
         for chunk in iter:
@@ -679,11 +680,14 @@ class EODAGInstrumentor(BaseInstrumentor):
 
         This only works if no other module also patches eodag.
         """
-        from eodag.rest import server
+        from stac_fastapi.eodag.core import EodagCoreClient as core_client
+        from stac_fastapi.eodag.extensions.data_download import (
+            BaseDataDownloadClient as download_client,
+        )
 
         patches = [
-            (server, "search_stac_items"),
-            (server, "download_stac_item"),
+            (core_client, "_search_base"),
+            (download_client, "get_data"),
             (QueryStringSearch, "_request"),
             (Download, "progress_callback_decorator"),
         ]
