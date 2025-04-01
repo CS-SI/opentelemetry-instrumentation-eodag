@@ -38,6 +38,7 @@ from eodag.utils import (
 )
 from eodag.utils.exceptions import NoMatchingProductType
 from fastapi import HTTPException, Request
+from fastapi.responses import StreamingResponse
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.metrics import (
     CallbackOptions,
@@ -302,12 +303,13 @@ def _instrument_download(
 
     @functools.wraps(wrapped_download_client_get_data)
     def wrapper_download_client_get_data(
+        self,
         federation_backend: str,
         collection_id: str,
         item_id: str,
         asset_name: Optional[str],
         request: Request,
-    ) -> Response:
+    ) -> StreamingResponse:
         span_name = "core-download"
         attributes = {
             "operation": "download",
@@ -328,7 +330,12 @@ def _instrument_download(
             # Call wrapped function
             try:
                 result = wrapped_download_client_get_data(
-                    federation_backend, collection_id, item_id, asset_name, request
+                    self,
+                    federation_backend,
+                    collection_id,
+                    item_id,
+                    asset_name,
+                    request,
                 )
             except Exception as exc:
                 exception = exc
