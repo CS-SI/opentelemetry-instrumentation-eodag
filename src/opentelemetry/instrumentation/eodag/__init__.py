@@ -457,15 +457,19 @@ def _instrument_download(
     ) -> StreamResponse:
         span_name = "core-download"
         # Don't use there the provider's product type.
+        product_type = product.product_type
+        if "alias" in product.properties:
+            product_type = product.properties["alias"]
+
         attributes = {
             "provider": product.provider,
-            "product_type": product.product_type,
+            "product_type": product_type,
         }
         number_downloads_counter.add(
             1,
             {
                 "provider": product.provider,
-                "product_type": product.product_type,
+                "product_type": product_type,
             },
         )
 
@@ -649,7 +653,10 @@ class EODAGInstrumentor(BaseInstrumentor):
             for product_type in self._eodag_api.list_product_types(
                 provider, fetch_providers=False
             ):
-                attributes = {"provider": provider, "product_type": product_type["_id"]}
+                pt = product_type["_id"]
+                if "alias" in product_type:
+                    pt = product_type["alias"]
+                attributes = {"provider": provider, "product_type": pt}
                 downloaded_data_counter.add(0, attributes)
                 number_downloads_counter.add(0, attributes)
 
