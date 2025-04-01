@@ -28,8 +28,6 @@ from eodag.plugins.download import aws, http
 from eodag.plugins.download.base import Download
 from eodag.plugins.search import PreparedSearch
 from eodag.plugins.search.qssearch import QueryStringSearch
-from eodag.rest.types.eodag_search import EODAGSearch
-from eodag.rest.utils import format_pydantic_error
 from eodag.types.download_args import DownloadConf
 from eodag.utils import (
     DEFAULT_DOWNLOAD_TIMEOUT,
@@ -38,6 +36,7 @@ from eodag.utils import (
     StreamResponse,
     Unpack,
 )
+from eodag.utils.exceptions import NoMatchingProductType
 from fastapi import HTTPException, Request
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.metrics import (
@@ -49,9 +48,9 @@ from opentelemetry.metrics import (
 )
 from opentelemetry.trace import SpanKind, Tracer, get_tracer
 from opentelemetry.util import types
-from pydantic import ValidationError as pydanticValidationError
 from requests import Response
 from requests.auth import AuthBase
+from stac_fastapi.eodag.core import prepare_search_base_args
 from stac_fastapi.types.search import BaseSearchPostRequest
 
 from opentelemetry.instrumentation.eodag.package import _instruments
@@ -152,21 +151,29 @@ def _instrument_search(
         search_request: BaseSearchPostRequest,
         request: Request,
     ) -> Dict[str, Any]:
-        try:
-            eodag_args = EODAGSearch.model_validate(
-                search_request.model_dump(exclude_none=True)
-            )
-        except pydanticValidationError as e:
-            raise HTTPException(status_code=400, detail=format_pydantic_error(e)) from e
+        eodag_args = prepare_search_base_args(
+            search_request=search_request, model=self.stac_metadata_model
+        )
+
+        request.state.eodag_args = eodag_args
+
+        # check if the collection exists
+        if product_type := eodag_args.get("productType"):
+            all_pt = request.app.state.dag.list_product_types(fetch_providers=False)
+            # only check the first collection (EODAG search only support a single collection)
+            existing_pt = [pt for pt in all_pt if pt["ID"] == product_type]
+            if not existing_pt:
+                raise NoMatchingProductType(
+                    f"Collection {product_type} does not exist."
+                )
+        else:
+            raise HTTPException(status_code=400, detail="A collection is required")
 
         span_name = "core-search"
         attributes: types.Attributes = {
             "operation": "search",
-            "product_type": eodag_args.productType,
+            "product_type": product_type,
         }
-        # The provider is optional
-        if eodag_args.provider:
-            attributes["provider"] = eodag_args.provider
 
         with tracer.start_as_current_span(
             span_name, kind=SpanKind.CLIENT, attributes=attributes
@@ -191,7 +198,7 @@ def _instrument_search(
             span.set_attributes(attributes)
 
             # Product type counter
-            searched_product_types_counter.add(1, attributes)
+            searched_product_types_counter.add(1, {"product_type": product_type})
 
             # Duration histograms
             request_duration_seconds.record(
@@ -224,10 +231,7 @@ def _instrument_search(
         prep: PreparedSearch,
     ) -> Response:
         span_name = "core-search"
-        # Don't use there the provider's product type.
-        attributes = {
-            "provider": self.provider,
-        }
+        attributes = {"provider": self.provider}
 
         with tracer.start_as_current_span(
             span_name, kind=SpanKind.CLIENT, attributes=attributes
@@ -308,9 +312,8 @@ def _instrument_download(
         attributes = {
             "operation": "download",
             "product_type": collection_id,
+            "provider": federation_backend,
         }
-        if federation_backend:
-            attributes["provider"] = federation_backend
 
         with tracer.start_as_current_span(
             span_name, kind=SpanKind.CLIENT, attributes=attributes
@@ -332,8 +335,6 @@ def _instrument_download(
             finally:
                 timer.stop_global_timer()
 
-            # Retrieve possible updated attributes
-            attributes = trace_attributes[trace_id]
             span.set_attributes(attributes)
 
             # Duration histograms
@@ -357,14 +358,14 @@ def _instrument_download(
     wrapped_download_client_get_data.opentelemetry_instrumentation_eodag_applied = True
     download_client.get_data = wrapper_download_client_get_data
 
-    def _count(iter: Iterable[bytes], product: EOProduct) -> Iterable[bytes]:
+    def _count(iter: Iterable[bytes], attributes: dict[str, Any]) -> Iterable[bytes]:
         for chunk in iter:
             increment = len(chunk)
             downloaded_data_counter.add(
                 increment,
                 {
-                    "provider": product.provider,
-                    "product_type": product.product_type,
+                    "provider": attributes["provider"],
+                    "product_type": attributes["product_type"],
                 },
             )
             yield chunk
@@ -386,17 +387,11 @@ def _instrument_download(
         **kwargs: Unpack[DownloadConf],
     ) -> StreamResponse:
         span_name = "core-download"
-        # Don't use there the provider's product type.
         attributes = {
             "provider": product.provider,
+            "product_type": product.product_type,
         }
-        number_downloads_counter.add(
-            1,
-            {
-                "provider": product.provider,
-                "product_type": product.product_type,
-            },
-        )
+        number_downloads_counter.add(1, attributes)
 
         with tracer.start_as_current_span(
             span_name, kind=SpanKind.CLIENT, attributes=attributes
@@ -407,12 +402,7 @@ def _instrument_download(
             # download operation.
             # If this wrapper is called after a different operation, then both `timer` and
             # `parent_attributes` are not available and no metric is generated.
-            timer = overhead_timers.get(trace_id)
-            parent_attributes = trace_attributes.get(trace_id)
-            if parent_attributes:
-                parent_attributes["provider"] = self.provider
-                # Get the EODAG's product type from the parent
-                attributes = parent_attributes
+            attributes = trace_attributes.get(trace_id, attributes)
 
             start_time = default_timer()
 
@@ -421,14 +411,14 @@ def _instrument_download(
                 result = wrapped_http_HTTPDownload_stream_download_dict(
                     self, product, auth, progress_callback, wait, timeout, **kwargs
                 )
-                content = _count(result.content, product)
+                content = _count(result.content, attributes)
             except Exception as exc:
                 exception = exc
             finally:
                 elapsed_time = default_timer() - start_time
 
             # Duration histograms
-            if timer:
+            if timer := overhead_timers.get(trace_id):
                 timer.record_subtask_time(elapsed_time)
                 outbound_request_duration_seconds.record(
                     elapsed_time, attributes=attributes
@@ -469,6 +459,7 @@ def _instrument_download(
         # Don't use there the provider's product type.
         attributes = {
             "provider": product.provider,
+            "product_type": product.product_type,
         }
         number_downloads_counter.add(
             1,
@@ -501,7 +492,7 @@ def _instrument_download(
                 result = wrapped_aws_AwsDownload_stream_download_dict(
                     self, product, auth, progress_callback, wait, timeout, **kwargs
                 )
-                content = _count(result.content, product)
+                content = _count(result.content, attributes)
             except Exception as exc:
                 exception = exc
             finally:
@@ -654,6 +645,14 @@ class EODAGInstrumentor(BaseInstrumentor):
             description="Number of downloads from each provider and product type",
         )
 
+        for provider in self._eodag_api.available_providers():
+            for product_type in self._eodag_api.list_product_types(
+                provider, fetch_providers=False
+            ):
+                attributes = {"provider": provider, "product_type": product_type["_id"]}
+                downloaded_data_counter.add(0, attributes)
+                number_downloads_counter.add(0, attributes)
+
         _instrument_download(
             tracer,
             downloaded_data_counter,
@@ -667,6 +666,10 @@ class EODAGInstrumentor(BaseInstrumentor):
             name="eodag.core.searched_product_types_total",
             description="The number of searches by provider and product type",
         )
+
+        for product_type in self._eodag_api.list_product_types(fetch_providers=False):
+            searched_product_types_counter.add(0, {"product_type": product_type["ID"]})
+
         _instrument_search(
             tracer,
             searched_product_types_counter,

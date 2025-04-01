@@ -15,6 +15,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""STAC FastAPI EODAG auto instrumentation package module."""
 
 _instruments = ("eodag > 2.0.0.dev0",)
 
