@@ -15,39 +15,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-[tox]
-envlist = py39, py310, py311, py312, py313, pypi, linters
-skipdist = true
+"""Opentelemetry tests."""
 
-# Mapping required by tox-gh-actions, only used in CI
-[gh-actions]
-python =
-    3.9: py39
-    3.10: py310
-    3.11: py311
-    3.12: py312
-    3.13: py313
 
-[testenv]
-install_command = uv pip install --upgrade {opts} {packages}
-deps =
-    .[dev]
-commands =
-    pytest --show-capture=no
-
-[testenv:pypi]
-skip_install = true
-# To prevent from installing eodag and the dev deps set in testenv
-deps =
-    build
-    twine
-commands =
-    # build package to be checked
-    python -m build
-    # Check that the long description is ready to be published on PyPI without errors
-    python -m twine check dist/*
-
-[testenv:linters]
-basepython = python3
-commands =
-    pre-commit run --all-files
+def test_needed():
+    pass

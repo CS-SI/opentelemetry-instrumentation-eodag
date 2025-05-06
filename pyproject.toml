@@ -64,6 +64,12 @@ exclude = [
     "py.typed",
 ]
 
+[tool.pytest.ini_options]
+addopts = "--disable-socket --allow-unix-socket --allow-hosts=localhost"
+testpaths = [
+    "tests",
+]
+
 [tool.uv]
 cache-keys = [{ git = true }]
 
