@@ -22,6 +22,13 @@ import logging
 from timeit import default_timer
 from typing import Any, Collection, Dict, Iterable, List, Optional, Union
 
+from fastapi import HTTPException, Request
+from fastapi.responses import StreamingResponse
+from requests import Response
+from requests.auth import AuthBase
+from stac_fastapi.eodag.core import prepare_search_base_args
+from stac_fastapi.types.search import BaseSearchPostRequest
+
 from eodag import EODataAccessGateway
 from eodag.api.product import EOProduct
 from eodag.plugins.download import aws, http
@@ -37,8 +44,7 @@ from eodag.utils import (
     Unpack,
 )
 from eodag.utils.exceptions import NoMatchingProductType
-from fastapi import HTTPException, Request
-from fastapi.responses import StreamingResponse
+from opentelemetry.instrumentation.eodag.package import _instruments
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.metrics import (
     CallbackOptions,
@@ -49,12 +55,6 @@ from opentelemetry.metrics import (
 )
 from opentelemetry.trace import SpanKind, Tracer, get_tracer
 from opentelemetry.util import types
-from requests import Response
-from requests.auth import AuthBase
-from stac_fastapi.eodag.core import prepare_search_base_args
-from stac_fastapi.types.search import BaseSearchPostRequest
-
-from opentelemetry.instrumentation.eodag.package import _instruments
 
 logger = logging.getLogger("eodag.utils.instrumentation.eodag")
 
@@ -152,9 +152,7 @@ def _instrument_search(
         search_request: BaseSearchPostRequest,
         request: Request,
     ) -> Dict[str, Any]:
-        eodag_args = prepare_search_base_args(
-            search_request=search_request, model=self.stac_metadata_model
-        )
+        eodag_args = prepare_search_base_args(search_request=search_request, model=self.stac_metadata_model)
 
         request.state.eodag_args = eodag_args
 
@@ -164,9 +162,7 @@ def _instrument_search(
             # only check the first collection (EODAG search only support a single collection)
             existing_pt = [pt for pt in all_pt if pt["ID"] == product_type]
             if not existing_pt:
-                raise NoMatchingProductType(
-                    f"Collection {product_type} does not exist."
-                )
+                raise NoMatchingProductType(f"Collection {product_type} does not exist.")
         else:
             raise HTTPException(status_code=400, detail="A collection is required")
 
@@ -176,9 +172,7 @@ def _instrument_search(
             "product_type": product_type,
         }
 
-        with tracer.start_as_current_span(
-            span_name, kind=SpanKind.CLIENT, attributes=attributes
-        ) as span:
+        with tracer.start_as_current_span(span_name, kind=SpanKind.CLIENT, attributes=attributes) as span:
             exception = None
             trace_id = span.get_span_context().trace_id
             timer = OverheadTimer()
@@ -202,15 +196,9 @@ def _instrument_search(
             searched_product_types_counter.add(1, {"product_type": product_type})
 
             # Duration histograms
-            request_duration_seconds.record(
-                timer.get_global_time(), attributes=attributes
-            )
-            overhead_attributes = {
-                k: v for k, v in attributes.items() if k != "product_type"
-            }
-            request_overhead_duration_seconds.record(
-                timer.get_overhead_time(), attributes=overhead_attributes
-            )
+            request_duration_seconds.record(timer.get_global_time(), attributes=attributes)
+            overhead_attributes = {k: v for k, v in attributes.items() if k != "product_type"}
+            request_overhead_duration_seconds.record(timer.get_overhead_time(), attributes=overhead_attributes)
             del overhead_timers[trace_id]
             del trace_attributes[trace_id]
 
@@ -234,9 +222,7 @@ def _instrument_search(
         span_name = "core-search"
         attributes = {"provider": self.provider}
 
-        with tracer.start_as_current_span(
-            span_name, kind=SpanKind.CLIENT, attributes=attributes
-        ) as span:
+        with tracer.start_as_current_span(span_name, kind=SpanKind.CLIENT, attributes=attributes) as span:
             exception = None
             trace_id = span.get_span_context().trace_id
             # Note: `overhead_timers` and `trace_attributes` are populated on a search or
@@ -265,9 +251,7 @@ def _instrument_search(
             # Duration histograms
             if timer:
                 timer.record_subtask_time(elapsed_time)
-                outbound_request_duration_seconds.record(
-                    elapsed_time, attributes=attributes
-                )
+                outbound_request_duration_seconds.record(elapsed_time, attributes=attributes)
 
             if exception is not None:
                 raise exception.with_traceback(exception.__traceback__)
@@ -317,9 +301,7 @@ def _instrument_download(
             "provider": federation_backend,
         }
 
-        with tracer.start_as_current_span(
-            span_name, kind=SpanKind.CLIENT, attributes=attributes
-        ) as span:
+        with tracer.start_as_current_span(span_name, kind=SpanKind.CLIENT, attributes=attributes) as span:
             exception = None
             trace_id = span.get_span_context().trace_id
             timer = OverheadTimer()
@@ -345,15 +327,9 @@ def _instrument_download(
             span.set_attributes(attributes)
 
             # Duration histograms
-            request_duration_seconds.record(
-                timer.get_global_time(), attributes=attributes
-            )
-            overhead_attributes = {
-                k: v for k, v in attributes.items() if k != "product_type"
-            }
-            request_overhead_duration_seconds.record(
-                timer.get_overhead_time(), attributes=overhead_attributes
-            )
+            request_duration_seconds.record(timer.get_global_time(), attributes=attributes)
+            overhead_attributes = {k: v for k, v in attributes.items() if k != "product_type"}
+            request_overhead_duration_seconds.record(timer.get_overhead_time(), attributes=overhead_attributes)
             del overhead_timers[trace_id]
             del trace_attributes[trace_id]
 
@@ -379,9 +355,7 @@ def _instrument_download(
 
     # Wrapping http.HTTPDownload._stream_download_dict
 
-    wrapped_http_HTTPDownload_stream_download_dict = (
-        http.HTTPDownload._stream_download_dict
-    )
+    wrapped_http_HTTPDownload_stream_download_dict = http.HTTPDownload._stream_download_dict
 
     @functools.wraps(wrapped_http_HTTPDownload_stream_download_dict)
     def wrapper_http_HTTPDownload_stream_download_dict(
@@ -400,9 +374,7 @@ def _instrument_download(
         }
         number_downloads_counter.add(1, attributes)
 
-        with tracer.start_as_current_span(
-            span_name, kind=SpanKind.CLIENT, attributes=attributes
-        ) as span:
+        with tracer.start_as_current_span(span_name, kind=SpanKind.CLIENT, attributes=attributes) as span:
             exception = None
             trace_id = span.get_span_context().trace_id
             # Note: `overhead_timers` and `trace_attributes` are populated on a search or
@@ -427,9 +399,7 @@ def _instrument_download(
             # Duration histograms
             if timer := overhead_timers.get(trace_id):
                 timer.record_subtask_time(elapsed_time)
-                outbound_request_duration_seconds.record(
-                    elapsed_time, attributes=attributes
-                )
+                outbound_request_duration_seconds.record(elapsed_time, attributes=attributes)
 
         if exception is not None:
             raise exception.with_traceback(exception.__traceback__)
@@ -441,12 +411,8 @@ def _instrument_download(
             status_code=result.status_code,
         )
 
-    wrapper_http_HTTPDownload_stream_download_dict.opentelemetry_instrumentation_eodag_applied = (
-        True
-    )
-    http.HTTPDownload._stream_download_dict = (
-        wrapper_http_HTTPDownload_stream_download_dict
-    )
+    wrapper_http_HTTPDownload_stream_download_dict.opentelemetry_instrumentation_eodag_applied = True
+    http.HTTPDownload._stream_download_dict = wrapper_http_HTTPDownload_stream_download_dict
 
     # Wrapping aws.AwsDownload._stream_download_dict
 
@@ -480,9 +446,7 @@ def _instrument_download(
             },
         )
 
-        with tracer.start_as_current_span(
-            span_name, kind=SpanKind.CLIENT, attributes=attributes
-        ) as span:
+        with tracer.start_as_current_span(span_name, kind=SpanKind.CLIENT, attributes=attributes) as span:
             exception = None
             trace_id = span.get_span_context().trace_id
             # Note: `overhead_timers` and `trace_attributes` are populated on a search or
@@ -512,9 +476,7 @@ def _instrument_download(
             # Duration histograms
             if timer:
                 timer.record_subtask_time(elapsed_time)
-                outbound_request_duration_seconds.record(
-                    elapsed_time, attributes=attributes
-                )
+                outbound_request_duration_seconds.record(elapsed_time, attributes=attributes)
 
         if exception is not None:
             raise exception.with_traceback(exception.__traceback__)
@@ -526,9 +488,7 @@ def _instrument_download(
             status_code=result.status_code,
         )
 
-    wrapper_aws_AwsDownload_stream_download_dict.opentelemetry_instrumentation_eodag_applied = (
-        True
-    )
+    wrapper_aws_AwsDownload_stream_download_dict.opentelemetry_instrumentation_eodag_applied = True
     aws.AwsDownload._stream_download_dict = wrapper_aws_AwsDownload_stream_download_dict
 
 
@@ -556,9 +516,7 @@ class EODAGInstrumentor(BaseInstrumentor):
         """
         return _instruments
 
-    def _available_providers_callback(
-        self, options: CallbackOptions
-    ) -> Iterable[Observation]:
+    def _available_providers_callback(self, options: CallbackOptions) -> Iterable[Observation]:
         """Open Telemetry callback to measure the number of available providers.
 
         :param options: Options for the callback.
@@ -567,9 +525,7 @@ class EODAGInstrumentor(BaseInstrumentor):
         :rtype: Iterable[Observation]
         """
         new_available_providers: List[str] = self._eodag_api.available_providers()
-        observations_dict: Dict[str, int] = {
-            p: 0 for p in self._last_available_providers
-        }
+        observations_dict: Dict[str, int] = {p: 0 for p in self._last_available_providers}
         for p in new_available_providers:
             observations_dict[p] = 1
         self._last_available_providers = new_available_providers
@@ -597,9 +553,7 @@ class EODAGInstrumentor(BaseInstrumentor):
         new_available_product_types: List[str] = [
             p["ID"] for p in self._eodag_api.list_product_types(fetch_providers=False)
         ]
-        observations_dict: Dict[str, int] = {
-            p: 0 for p in self._last_available_product_types
-        }
+        observations_dict: Dict[str, int] = {p: 0 for p in self._last_available_product_types}
         for p in new_available_product_types:
             observations_dict[p] = 1
         self._last_available_product_types = new_available_product_types
@@ -657,9 +611,7 @@ class EODAGInstrumentor(BaseInstrumentor):
         )
 
         for provider in self._eodag_api.available_providers():
-            for product_type in self._eodag_api.list_product_types(
-                provider, fetch_providers=False
-            ):
+            for product_type in self._eodag_api.list_product_types(provider, fetch_providers=False):
                 pt = product_type["_id"]
                 if "alias" in product_type:
                     pt = product_type["alias"]
