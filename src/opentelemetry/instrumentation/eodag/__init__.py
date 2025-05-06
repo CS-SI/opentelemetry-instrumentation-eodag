@@ -394,9 +394,12 @@ def _instrument_download(
         **kwargs: Unpack[DownloadConf],
     ) -> StreamResponse:
         span_name = "core-download"
+        product_type = product.product_type
+        if "alias" in product.properties:
+            product_type = product.properties["alias"]
         attributes = {
             "provider": product.provider,
-            "product_type": product.product_type,
+            "product_type": product_type,
         }
         number_downloads_counter.add(1, attributes)
 
