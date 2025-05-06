@@ -38,9 +38,6 @@ dev = [
     "twine",
     "wheel",
 ]
-instruments = [
-    "stac-fastapi-eodag @ git+https://gitlab.si.c-s.fr/aubin.lambare/stac-fastapi-eodag",
-]
 
 [project.entry-points.opentelemetry_instrumentor]
 eodag = "opentelemetry.instrumentation.eodag:EODAGInstrumentor"
