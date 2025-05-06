@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "opentelemetry-instrumentation-eodag"
-version = "0.0.1"
+version = "0.1.dev0"
 description = "OpenTelemetry EODAG Instrumentation"
 readme = "README.rst"
 authors = [
-    {name = "CS GROUP - France (CSSI)", email = "eodag@csgroup.space"},
+    {name = "CS GROUP - France", email = "eodag@csgroup.space"},
 ]
 license = {file = "LICENSE"}
-requires-python = ">=3.6"
+requires-python = ">=3.9"
 dependencies = [
     "eodag",
     "stac-fastapi.types",
@@ -26,6 +26,7 @@ Issues = "https://github.com/CS-SI/opentelemetry-instrumentation-eodag/issues/"
 
 [project.optional-dependencies]
 dev = [
+    "pre-commit",
     "pytest",
     "pytest-cov",
     "pytest-html",
@@ -33,11 +34,9 @@ dev = [
     "pytest-socket",
     "pytest-instafail",
     "tox",
-    "wheel",
+    "tox-uv",
     "twine",
-    "flake8",
-    "Flake8-pyproject",
-    "pre-commit",
+    "wheel",
 ]
 instruments = [
     "stac-fastapi-eodag @ git+https://gitlab.si.c-s.fr/aubin.lambare/stac-fastapi-eodag",
@@ -65,33 +64,43 @@ exclude = [
     "py.typed",
 ]
 
-[tool.flake8]
-ignore = ["E203", "W503"]
-max-line-length = 120
-exclude = [
-    ".git",
-    "__pycache__",
-    ".tox",
-    "build",
-    "dist",
-    "docs/conf.py",
-    "tests/context.py",
+[tool.pytest.ini_options]
+addopts = "--disable-socket --allow-unix-socket --allow-hosts=localhost"
+testpaths = [
+    "tests",
 ]
 
-[tool.isort]
-multi_line_output = 3
-include_trailing_comma = true
-force_grid_wrap = 0
-use_parentheses = true
-line_length = 88
-ensure_newline_before_comments = true
-known_first_party = "tests"
-known_third_party = "concurrent.futures"
-default_section = "THIRDPARTY"
+[tool.uv]
+cache-keys = [{ git = true }]
 
-[tool.pydocstyle]
-# Check for docstring presence only
-select = "D1"
-add_ignore = ["D107", "D100", "D105"]
-# Don't require docstrings for tests or setup
-match = '(?!test|setup).*\.py'
+[tool.ruff]
+line-length = 120
+indent-width = 4
+
+[tool.ruff.lint]
+# https://docs.astral.sh/ruff/rules/
+select = [
+    "B",        # flake8-bugbear
+    "E",        # pycodestyle errors
+    "W",        # pycodestyle warnings
+    "F",        # Pyflakes
+    "C90",      # mccabe (complexity)
+    "I",        # isort
+    "T20",      # flake8-print
+    "D1",       # pydocstyle - docstring presence only
+]
+ignore = [
+    "E203",     # Whitespace before '{symbol}'
+    "E266",     # Too many leading '#' for block comment
+    "E501",     # Line too long
+    "D100",     # Missing docstring in public module
+    "D107",     # Missing docstring in __init__
+    "D105",     # Missing docstring in magic method
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/context.py" = ["F401"]       # F401: unused import
+"tests/**.py" = ["D"]               # D: pydocstyle
+
+[tool.ruff.lint.mccabe]
+max-complexity = 18

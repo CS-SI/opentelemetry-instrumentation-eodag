@@ -3,7 +3,7 @@
 Contribute
 ==========
 
-Thank you for considering contributing to eodag!
+Thank you for considering contributing to opentelemetry-instrumentation-eodag!
 
 
 Report issues
@@ -36,14 +36,14 @@ If you intend to contribute to opentelemetry-instrumentation-eodag source code:
 
     git clone https://github.com/CS-SI/opentelemetry-instrumentation-eodag.git
     cd opentelemetry-instrumentation-eodag
-    python -m pip install
+    python -m pip install -e ".[dev]"
     pre-commit install
 
-We use ``pre-commit`` to run a suite of linters, formatters and pre-commit hooks (``black``, ``isort``, ``flake8``) to
+We use ``pre-commit`` to run a suite of linters, formatters and pre-commit hooks to
 ensure the code base is homogeneously formatted and easier to read. It's important that you install it, since we run
 the exact same hooks in the Continuous Integration.
 
-To run the default test suite (which excludes end-to-end tests):
+To run the default test suite:
 
 .. code-block:: bash
 
@@ -54,28 +54,3 @@ To run the default test suite in parallel:
 .. code-block:: bash
 
     tox -p
-
-To only run end-to-end tests:
-
-.. code-block:: bash
-
-    tox -- tests/test_end_to_end.py
-
-To run the entire tests (units, integration and end-to-end):
-
-.. code-block:: bash
-
-    tox -- tests eodag
-
-.. note::
-
-    * Running the `tox` command will also build the docs. As the documentation
-      includes some notebooks (for the tutorials), the build process will need
-      `pandoc <https://pandoc.org>`_ to succeed. If the build process fails for
-      you, please `install <https://pandoc.org/installing.html>`_ pandoc and try
-      again.
-
-    * eodag is tested against python versions 3.8, 3.9, 3.10, 3.11 and 3.12. Ensure you have
-      these versions installed before you run tox. You can use
-      `pyenv <https://github.com/pyenv/pyenv>`_ to manage many different versions
-      of python
