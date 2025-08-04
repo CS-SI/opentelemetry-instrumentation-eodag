@@ -20,17 +20,16 @@
 import functools
 import logging
 from timeit import default_timer
-from typing import Any, Callable, Collection, Dict, Iterable, List, Optional
+from typing import Any, Callable, Collection, Dict, Iterable, List, Optional, Union
 
-from fastapi import HTTPException, Request
 from requests import Response
-from stac_fastapi.eodag.core import prepare_search_base_args
-from stac_fastapi.types.search import BaseSearchPostRequest
+from shapely.geometry.base import BaseGeometry
 
 from eodag import EODataAccessGateway
+from eodag.api.search_result import SearchResult
 from eodag.plugins.search import PreparedSearch
 from eodag.plugins.search.qssearch import QueryStringSearch
-from eodag.utils.exceptions import NoMatchingProductType
+from eodag.utils import DEFAULT_ITEMS_PER_PAGE, DEFAULT_PAGE
 from opentelemetry.instrumentation.eodag.package import _instruments
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.metrics import (
@@ -127,36 +126,29 @@ def _instrument_search(
     :param request_overhead_duration_seconds: EODAG overhead histogram.
     :type request_overhead_duration_seconds: Histogram
     """
-    from stac_fastapi.eodag.core import EodagCoreClient as core_client
+    from eodag.api.core import EODataAccessGateway as dag
 
-    # Wrapping core_client._search_base
+    # wrapping dag.search
+    wrapped_dag__search = dag.search
 
-    wrapped_core__search_base = core_client._search_base
-
-    @functools.wraps(wrapped_core__search_base)
-    def wrapper_core__search_base(
-        self: core_client,
-        search_request: BaseSearchPostRequest,
-        request: Request,
-    ) -> Dict[str, Any]:
-        eodag_args = prepare_search_base_args(search_request=search_request, model=self.stac_metadata_model)
-
-        request.state.eodag_args = eodag_args
-
-        # check if the collection exists
-        if product_type := eodag_args.get("productType"):
-            all_pt = request.app.state.dag.list_product_types(fetch_providers=False)
-            # only check the first collection (EODAG search only support a single collection)
-            existing_pt = [pt for pt in all_pt if pt["ID"] == product_type]
-            if not existing_pt:
-                raise NoMatchingProductType(f"Collection {product_type} does not exist.")
-        else:
-            raise HTTPException(status_code=400, detail="A collection is required")
-
+    @functools.wraps(wrapped_dag__search)
+    def wrapper_dag__search(
+        self,
+        page: int = DEFAULT_PAGE,
+        items_per_page: int = DEFAULT_ITEMS_PER_PAGE,
+        raise_errors: bool = False,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+        geom: Optional[Union[str, dict[str, float], BaseGeometry]] = None,
+        locations: Optional[dict[str, str]] = None,
+        provider: Optional[str] = None,
+        count: bool = False,
+        **kwargs: Any,
+    ) -> SearchResult:
         span_name = "core-search"
         attributes: types.Attributes = {
             "operation": "search",
-            "product_type": product_type,
+            "product_type": kwargs.get("productType"),
         }
 
         with tracer.start_as_current_span(span_name, kind=SpanKind.CLIENT, attributes=attributes) as span:
@@ -169,7 +161,19 @@ def _instrument_search(
 
             # Call wrapped function
             try:
-                result = wrapped_core__search_base(self, search_request, request)
+                result = wrapped_dag__search(
+                    self,
+                    page=page,
+                    items_per_page=items_per_page,
+                    raise_errors=raise_errors,
+                    start=start,
+                    end=end,
+                    geom=geom,
+                    locations=locations,
+                    provider=provider,
+                    count=count,
+                    **kwargs,
+                )
             except Exception as exc:
                 exception = exc
             finally:
@@ -180,7 +184,7 @@ def _instrument_search(
             span.set_attributes(attributes)
 
             # Product type counter
-            searched_product_types_counter.add(1, {"product_type": product_type})
+            searched_product_types_counter.add(1, {"product_type": kwargs.get("productType")})
 
             # Duration histograms
             request_duration_seconds.record(timer.get_global_time(), attributes=attributes)
@@ -194,8 +198,8 @@ def _instrument_search(
 
         return result
 
-    wrapper_core__search_base.opentelemetry_instrumentation_eodag_applied = True
-    core_client._search_base = wrapper_core__search_base
+    wrapper_dag__search.opentelemetry_instrumentation_eodag_applied = True
+    dag.search = wrapper_dag__search
 
     # Wrapping QueryStringSearch
 
