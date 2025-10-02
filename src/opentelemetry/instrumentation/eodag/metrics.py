@@ -29,6 +29,19 @@ from opentelemetry.metrics import Counter, Histogram, Meter
 logger = logging.getLogger("otel.eodag")
 
 
+def safe_metrics_call(func: Callable) -> Callable:
+    """Decorator to safely call metric functions without raising exceptions."""
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            logger.debug(f"Metric call failed silently: {e}")
+
+    return wrapper
+
+
 def _instrument_search(
     searched_product_types_counter: Counter,
 ) -> None:
@@ -65,35 +78,32 @@ def _create_stream_download_wrapper(
 ) -> Callable[..., Any]:
     """Create a wrapper for _stream_download_dict methods with common instrumentation logic."""
 
-    def _count(iter: Iterable[bytes], attributes: dict[str, Any]) -> Iterable[bytes]:
-        for chunk in iter:
-            increment = len(chunk)
-            downloaded_data_counter.add(increment, attributes=attributes)
-            yield chunk
+    safe_add_downloads = safe_metrics_call(number_downloads_counter.add)
+    safe_add_data = safe_metrics_call(downloaded_data_counter.add)
 
     def wrapper(wrapped, _, args, kwargs):
-        product = args[0]
+        try:
+            product = args[0]
 
-        # Common labels for all metrics
-        labels = {
-            "provider": product.provider,
-            "product_type": product.properties.get("alias") or product.product_type,
-        }
+            labels = {
+                "provider": product.provider,
+                "product_type": product.properties.get("alias") or product.product_type,
+            }
+        except Exception as exc:
+            logger.debug(f"Could not extract product info for download metrics: {exc}")
 
-        number_downloads_counter.add(1, labels)
+        safe_add_downloads(1, labels)
 
-        # Execute the original method
         result = wrapped(*args, **kwargs)
 
-        # Count bytes in the stream response
-        if hasattr(result, "content") and result.content:
-            counted_content = _count(result.content, labels)
-            # Create new StreamResponse with counted content
-            new_result = type(result)(
-                content=counted_content,
-                **{k: v for k, v in result.__dict__.items() if k != "content"},
-            )
-            result = new_result
+        if stream := getattr(result, "content", None):
+
+            def _counted_stream() -> Iterable[bytes]:
+                for chunk in stream:
+                    safe_add_data(len(chunk), attributes=labels)
+                    yield chunk
+
+            result.content = _counted_stream()
 
         return result
 
