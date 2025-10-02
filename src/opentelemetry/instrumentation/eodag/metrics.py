@@ -61,9 +61,7 @@ def _instrument_search(
 
         searched_product_types_counter.add(
             1,
-            {"product_type": prepared_kwargs.get("productType")}
-            if search_plugins
-            else "__INVALID__",
+            {"product_type": prepared_kwargs.get("productType")} if search_plugins else "__INVALID__",
         )
 
         return search_plugins, prepared_kwargs
@@ -91,6 +89,7 @@ def _create_stream_download_wrapper(
             }
         except Exception as exc:
             logger.debug(f"Could not extract product info for download metrics: {exc}")
+            labels = {"provider": "__UNKNOWN__", "product_type": "__UNKNOWN__"}
 
         safe_add_downloads(1, labels)
 
@@ -110,9 +109,7 @@ def _create_stream_download_wrapper(
     return wrapper
 
 
-def _instrument_download(
-    downloaded_data_counter: Counter, number_downloads_counter: Counter
-) -> None:
+def _instrument_download(downloaded_data_counter: Counter, number_downloads_counter: Counter) -> None:
     """Add the instrumentation for download operations.
 
     :param downloaded_data_counter: Downloaded data volume counter.
@@ -164,9 +161,7 @@ def init_and_patch(meter: Meter, eodag_api: EODataAccessGateway) -> None:
     )
 
     for provider in eodag_api.available_providers():
-        for product_type in eodag_api.list_product_types(
-            provider, fetch_providers=False
-        ):
+        for product_type in eodag_api.list_product_types(provider, fetch_providers=False):
             attributes = {
                 "provider": provider,
                 "product_type": product_type.get("alias") or product_type["_id"],
