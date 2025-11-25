@@ -61,7 +61,9 @@ def _instrument_search(
 
         searched_collections_counter.add(
             1,
-            {"collection": prepared_kwargs.get("collection")} if search_plugins else "__INVALID__",
+            {"collection": kwargs.get("collection") or prepared_kwargs.get("collection")}
+            if search_plugins
+            else "__INVALID__",
         )
 
         return search_plugins, prepared_kwargs
@@ -85,7 +87,7 @@ def _create_stream_download_wrapper(
 
             labels = {
                 "provider": product.provider,
-                "collection": product.properties.get("alias") or product.collection,
+                "collection": product.properties.get("eodag:alias") or product.collection,
             }
         except Exception as exc:
             logger.debug(f"Could not extract product info for download metrics: {exc}")
