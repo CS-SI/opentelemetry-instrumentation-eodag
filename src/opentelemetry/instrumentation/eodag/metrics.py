@@ -43,12 +43,12 @@ def safe_metrics_call(func: Callable) -> Callable:
 
 
 def _instrument_search(
-    searched_product_types_counter: Counter,
+    searched_collections_counter: Counter,
 ) -> None:
     """Add the instrumentation for search operations.
 
-    :param searched_product_types_counter: Searched product types counter.
-    :type searched_product_types_counter: Counter
+    :param searched_collections_counter: Searched collection types counter.
+    :type searched_collections_counter: Counter
     """
     from eodag.api.core import EODataAccessGateway as dag
 
@@ -59,9 +59,11 @@ def _instrument_search(
     def wrapper_dag__prepare_search(*args, **kwargs) -> SearchResult:
         search_plugins, prepared_kwargs = wrapped_dag__prepare_search(*args, **kwargs)
 
-        searched_product_types_counter.add(
+        searched_collections_counter.add(
             1,
-            {"product_type": prepared_kwargs.get("productType")} if search_plugins else "__INVALID__",
+            {"collection": kwargs.get("collection") or prepared_kwargs.get("collection")}
+            if search_plugins
+            else "__INVALID__",
         )
 
         return search_plugins, prepared_kwargs
@@ -85,11 +87,11 @@ def _create_stream_download_wrapper(
 
             labels = {
                 "provider": product.provider,
-                "product_type": product.properties.get("alias") or product.product_type,
+                "collection": product.properties.get("eodag:alias") or product.collection,
             }
         except Exception as exc:
             logger.debug(f"Could not extract product info for download metrics: {exc}")
-            labels = {"provider": "__UNKNOWN__", "product_type": "__UNKNOWN__"}
+            labels = {"provider": "__UNKNOWN__", "collection": "__UNKNOWN__"}
 
         safe_add_downloads(1, labels)
 
@@ -153,33 +155,33 @@ def init_and_patch(meter: Meter, eodag_api: EODataAccessGateway) -> None:
     """Create the metrics for EODAG."""
     downloaded_data_counter = meter.create_counter(
         name="eodag.download.downloaded_data_bytes_total",
-        description="Measure data downloaded from each provider and product type",
+        description="Measure data downloaded from each provider and collection",
     )
     number_downloads_counter = meter.create_counter(
         name="eodag.download.number_downloads",
-        description="Number of downloads from each provider and product type",
+        description="Number of downloads from each provider and collection",
     )
 
     for provider in eodag_api.available_providers():
-        for product_type in eodag_api.list_product_types(provider, fetch_providers=False):
+        for collection in eodag_api.list_collections(provider, fetch_providers=False):
             attributes = {
                 "provider": provider,
-                "product_type": product_type.get("alias") or product_type["_id"],
+                "collection": collection.get("alias") or collection["_id"],
             }
             downloaded_data_counter.add(0, attributes)
             number_downloads_counter.add(0, attributes)
 
     _instrument_download(downloaded_data_counter, number_downloads_counter)
 
-    searched_product_types_counter = meter.create_counter(
-        name="eodag.core.searched_product_types_total",
-        description="The number of searches by provider and product type",
+    searched_collections_counter = meter.create_counter(
+        name="eodag.core.searched_collections_total",
+        description="The number of searches by provider and collection",
     )
 
-    for product_type in eodag_api.list_product_types(fetch_providers=False):
-        searched_product_types_counter.add(0, {"product_type": product_type["ID"]})
+    for collection in eodag_api.list_collections(fetch_providers=False):
+        searched_collections_counter.add(0, {"collection": collection["ID"]})
 
-    _instrument_search(searched_product_types_counter)
+    _instrument_search(searched_collections_counter)
 
 
 def remove_patches():
