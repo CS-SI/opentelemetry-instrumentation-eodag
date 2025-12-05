@@ -162,7 +162,7 @@ def init_and_patch(meter: Meter, eodag_api: EODataAccessGateway) -> None:
         description="Number of downloads from each provider and collection",
     )
 
-    for provider in eodag_api.available_providers():
+    for provider in eodag_api.providers:
         for collection in eodag_api.list_collections(provider, fetch_providers=False):
             attributes = {
                 "provider": provider,
