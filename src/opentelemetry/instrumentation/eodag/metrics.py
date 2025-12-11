@@ -87,7 +87,7 @@ def _create_stream_download_wrapper(
 
             labels = {
                 "provider": product.provider,
-                "collection": product.properties.get("eodag:alias") or product.collection,
+                "collection": product.collection,
             }
         except Exception as exc:
             logger.debug(f"Could not extract product info for download metrics: {exc}")
