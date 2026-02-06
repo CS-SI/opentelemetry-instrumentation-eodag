@@ -87,7 +87,7 @@ def _create_stream_download_wrapper(
 
             labels = {
                 "provider": product.provider,
-                "collection": product.properties.get("eodag:alias") or product.collection,
+                "collection": product.collection,
             }
         except Exception as exc:
             logger.debug(f"Could not extract product info for download metrics: {exc}")
@@ -162,11 +162,11 @@ def init_and_patch(meter: Meter, eodag_api: EODataAccessGateway) -> None:
         description="Number of downloads from each provider and collection",
     )
 
-    for provider in eodag_api.available_providers():
+    for provider in eodag_api.providers:
         for collection in eodag_api.list_collections(provider, fetch_providers=False):
             attributes = {
                 "provider": provider,
-                "collection": collection.get("alias") or collection["_id"],
+                "collection": collection.id,
             }
             downloaded_data_counter.add(0, attributes)
             number_downloads_counter.add(0, attributes)
@@ -179,7 +179,7 @@ def init_and_patch(meter: Meter, eodag_api: EODataAccessGateway) -> None:
     )
 
     for collection in eodag_api.list_collections(fetch_providers=False):
-        searched_collections_counter.add(0, {"collection": collection["ID"]})
+        searched_collections_counter.add(0, {"collection": collection.id})
 
     _instrument_search(searched_collections_counter)
 
