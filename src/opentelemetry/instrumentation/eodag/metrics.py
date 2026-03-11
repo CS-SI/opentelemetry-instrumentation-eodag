@@ -101,8 +101,9 @@ def _create_stream_download_wrapper(
 
             def _counted_stream() -> Iterable[bytes]:
                 for chunk in stream:
-                    safe_add_data(len(chunk), attributes=labels)
-                    yield chunk
+                    if chunk:
+                        safe_add_data(len(chunk), attributes=labels)
+                        yield chunk
 
             result.content = _counted_stream()
 
