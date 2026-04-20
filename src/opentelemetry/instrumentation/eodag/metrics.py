@@ -163,7 +163,7 @@ def init_and_patch(meter: Meter, eodag_api: EODataAccessGateway) -> None:
     )
 
     for provider in eodag_api.providers:
-        for collection in eodag_api.list_collections(provider, fetch_providers=False):
+        for collection in eodag_api.list_collections(providers=[provider]):
             attributes = {
                 "provider": provider,
                 "collection": collection.id,
@@ -178,7 +178,7 @@ def init_and_patch(meter: Meter, eodag_api: EODataAccessGateway) -> None:
         description="The number of searches by provider and collection",
     )
 
-    for collection in eodag_api.list_collections(fetch_providers=False):
+    for collection in eodag_api.list_collections():
         searched_collections_counter.add(0, {"collection": collection.id})
 
     _instrument_search(searched_collections_counter)

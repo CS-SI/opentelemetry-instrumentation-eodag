@@ -28,9 +28,7 @@ def traced_method(tracer: Tracer, span_name: str):
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            with tracer.start_as_current_span(
-                span_name, kind=SpanKind.INTERNAL
-            ) as span:
+            with tracer.start_as_current_span(span_name, kind=SpanKind.INTERNAL) as span:
                 # Ajoute tous les kwargs comme attributs
                 for k, v in kwargs.items():
                     if isinstance(v, (str, int, float, bool)):
@@ -55,27 +53,25 @@ def traced_method(tracer: Tracer, span_name: str):
 def patch_eodag(tracer: Tracer):
     """Patch EODAGPluginMount and EODataAccessGateway public methods for tracing."""
     from eodag.api.core import EODataAccessGateway
-    from eodag.plugins.manager import PluginManager
+    from eodag.plugins.base import EODAGPluginMount
 
     # Patch EODAGPluginMount to trace plugin public methods
-    orig_build_plugin = PluginManager._build_plugin
+    orig_get_plugin_by_class_name = EODAGPluginMount.get_plugin_by_class_name
 
-    def new_build_plugin(*args, **kwargs):
+    def new_get_plugin_by_class_name(*args, **kwargs):
         """Wrap all public methods of a plugin instance with tracing."""
-        plugin = orig_build_plugin(*args, **kwargs)
+        plugin = orig_get_plugin_by_class_name(*args, **kwargs)
         for attr_name in dir(plugin):
             if attr_name.startswith("_"):
                 continue
             attr = getattr(plugin, attr_name)
             if callable(attr) and not getattr(attr, "_otel_tracing_applied", False):
-                wrapped = traced_method(
-                    tracer, f"{plugin.__class__.__name__}.{attr_name}"
-                )(attr)
+                wrapped = traced_method(tracer, f"{plugin.__class__.__name__}.{attr_name}")(attr)
                 setattr(plugin, attr_name, wrapped)
 
         return plugin
 
-    PluginManager._build_plugin = new_build_plugin
+    EODAGPluginMount.get_plugin_by_class_name = new_get_plugin_by_class_name
 
     # Patch EODataAccessGateway to trace core public methods
     for attr_name in dir(EODataAccessGateway):
