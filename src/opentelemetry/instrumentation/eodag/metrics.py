@@ -162,14 +162,15 @@ def init_and_patch(meter: Meter, eodag_api: EODataAccessGateway) -> None:
         description="Number of downloads from each provider and collection",
     )
 
-    for provider in eodag_api.providers:
-        for collection in eodag_api.list_collections(provider, fetch_providers=False):
-            attributes = {
-                "provider": provider,
-                "collection": collection.id,
-            }
-            downloaded_data_counter.add(0, attributes)
-            number_downloads_counter.add(0, attributes)
+    if eodag_api is not None:
+        for provider in eodag_api.providers:
+            for collection in eodag_api.list_collections(provider, fetch_providers=False):
+                attributes = {
+                    "provider": provider,
+                    "collection": collection.id,
+                }
+                downloaded_data_counter.add(0, attributes)
+                number_downloads_counter.add(0, attributes)
 
     _instrument_download(downloaded_data_counter, number_downloads_counter)
 
@@ -178,8 +179,9 @@ def init_and_patch(meter: Meter, eodag_api: EODataAccessGateway) -> None:
         description="The number of searches by provider and collection",
     )
 
-    for collection in eodag_api.list_collections(fetch_providers=False):
-        searched_collections_counter.add(0, {"collection": collection.id})
+    if eodag_api is not None:
+        for collection in eodag_api.list_collections(fetch_providers=False):
+            searched_collections_counter.add(0, {"collection": collection.id})
 
     _instrument_search(searched_collections_counter)
 

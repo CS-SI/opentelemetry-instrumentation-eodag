@@ -17,6 +17,16 @@
 # limitations under the License.
 """Opentelemetry tests."""
 
+from unittest.mock import MagicMock, patch
+
+from opentelemetry.instrumentation.eodag import metrics
+
 
 def test_needed():
     pass
+
+
+def test_init_and_patch_accepts_none_eodag_api():
+    meter = MagicMock()
+    with patch.object(metrics, "_instrument_download"), patch.object(metrics, "_instrument_search"):
+        metrics.init_and_patch(meter, None)
