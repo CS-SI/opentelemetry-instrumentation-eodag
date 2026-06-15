@@ -76,7 +76,7 @@ def _create_stream_download_wrapper(
     downloaded_data_counter: Counter,
     number_downloads_counter: Histogram,
 ) -> Callable[..., Any]:
-    """Create a wrapper for _stream_download_dict methods with common instrumentation logic."""
+    """Create a wrapper for stream_download methods with common instrumentation logic."""
 
     safe_add_downloads = safe_metrics_call(number_downloads_counter.add)
     safe_add_data = safe_metrics_call(downloaded_data_counter.add)
@@ -126,7 +126,7 @@ def _instrument_download(downloaded_data_counter: Counter, number_downloads_coun
         if hasattr(http_module, "HTTPDownload"):
             wrap_function_wrapper(
                 http_module,
-                "HTTPDownload._stream_download_dict",
+                "HTTPDownload.stream_download",
                 _create_stream_download_wrapper(
                     downloaded_data_counter,
                     number_downloads_counter,
@@ -141,7 +141,7 @@ def _instrument_download(downloaded_data_counter: Counter, number_downloads_coun
         if hasattr(aws_module, "AwsDownload"):
             wrap_function_wrapper(
                 aws_module,
-                "AwsDownload._stream_download_dict",
+                "AwsDownload.stream_download",
                 _create_stream_download_wrapper(
                     downloaded_data_counter,
                     number_downloads_counter,
@@ -206,13 +206,13 @@ def remove_patches():
     try:
         http_module = importlib.import_module("eodag.plugins.download.http")
         if hasattr(http_module, "HTTPDownload"):
-            patches.append((http_module.HTTPDownload, "_stream_download_dict"))
+            patches.append((http_module.HTTPDownload, "stream_download"))
     except ImportError:
         pass
 
     try:
         aws_module = importlib.import_module("eodag.plugins.download.aws")
         if hasattr(aws_module, "AwsDownload"):
-            patches.append((aws_module.AwsDownload, "_stream_download_dict"))
+            patches.append((aws_module.AwsDownload, "stream_download"))
     except ImportError:
         pass
