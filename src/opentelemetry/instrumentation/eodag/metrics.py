@@ -19,9 +19,9 @@
 
 import functools
 import logging
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Optional
 
-from eodag import EODataAccessGateway
+from eodag.api.core import EODataAccessGateway
 from eodag.api.search_result import SearchResult
 from eodag.plugins.search.qssearch import QueryStringSearch
 from opentelemetry.metrics import Counter, Histogram, Meter
@@ -50,10 +50,8 @@ def _instrument_search(
     :param searched_collections_counter: Searched collection types counter.
     :type searched_collections_counter: Counter
     """
-    from eodag.api.core import EODataAccessGateway as dag
-
-    # wrapping dag._prepare_search
-    wrapped_dag__prepare_search = dag._prepare_search
+    # wrapping EODataAccessGateway._prepare_search
+    wrapped_dag__prepare_search = EODataAccessGateway._prepare_search
 
     @functools.wraps(wrapped_dag__prepare_search)
     def wrapper_dag__prepare_search(*args, **kwargs) -> SearchResult:
@@ -69,7 +67,7 @@ def _instrument_search(
         return search_plugins, prepared_kwargs
 
     wrapper_dag__prepare_search.opentelemetry_instrumentation_eodag_applied = True
-    dag._prepare_search = wrapper_dag__prepare_search
+    EODataAccessGateway._prepare_search = wrapper_dag__prepare_search
 
 
 def _create_stream_download_wrapper(
@@ -151,7 +149,7 @@ def _instrument_download(downloaded_data_counter: Counter, number_downloads_coun
         logger.warning("Could not instrument AWS downloads: module not found")
 
 
-def init_and_patch(meter: Meter, eodag_api: EODataAccessGateway) -> None:
+def init_and_patch(meter: Meter, eodag_api: Optional[EODataAccessGateway]) -> None:
     """Create the metrics for EODAG."""
     downloaded_data_counter = meter.create_counter(
         name="eodag.download.downloaded_data_bytes_total",
